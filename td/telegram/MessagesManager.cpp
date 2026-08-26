@@ -7166,7 +7166,16 @@ void MessagesManager::after_get_difference() {
 
     auto dialog_list_id = DialogListId(FolderId::archive());
     auto *list = get_dialog_list(dialog_list_id);
-    CHECK(list != nullptr);
+    if (list == nullptr) {
+      // The binlog may say auth=ok while my_id is still unknown: that is what a session imported
+      // from another client (Telethon and friends) looks like until the getUsers query sent from
+      // AuthManager's constructor returns. In that window AuthManager is not in State::Ok yet, so
+      // MessagesManager::init() did not create the dialog lists (was_authorized_user is false) and
+      // stock TDLib aborts the whole process right here on the first getDifference. There is
+      // nothing to initialize yet -- the lists are created once authorization completes.
+      LOG(INFO) << "Skip unread count initialization: dialog lists are not created yet";
+      return;
+    }
     if (!list->is_dialog_unread_count_inited_) {
       int32 limit = list->are_pinned_dialogs_inited_ ? static_cast<int32>(list->pinned_dialogs_.size())
                                                      : get_pinned_dialogs_limit(dialog_list_id);
