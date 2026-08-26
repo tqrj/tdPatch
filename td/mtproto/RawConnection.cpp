@@ -66,7 +66,7 @@ class RawConnectionDefault final : public RawConnection {
     packet_info.no_crypto_flag = false;
     packet_info.salt = salt;
     packet_info.session_id = session_id;
-    packet_info.use_random_padding = transport_->use_random_padding();
+    packet_info.use_random_padding = true;  // tdesktop always pads randomly
     auto packet =
         Transport::write(storer, auth_key, &packet_info, transport_->max_prepend_size(), transport_->max_append_size());
 

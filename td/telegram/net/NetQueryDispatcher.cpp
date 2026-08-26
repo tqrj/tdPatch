@@ -366,7 +366,7 @@ int32 NetQueryDispatcher::get_session_count() {
 }
 
 bool NetQueryDispatcher::get_use_pfs() {
-  return G()->get_option_boolean("use_pfs") || get_session_count() > 1;
+  return true;  // tdesktop always binds temporary auth keys
 }
 
 NetQueryDispatcher::NetQueryDispatcher(const std::function<ActorShared<>()> &create_reference) {

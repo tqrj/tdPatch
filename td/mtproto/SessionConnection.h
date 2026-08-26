@@ -146,20 +146,21 @@ class SessionConnection final
     return max(2.0, raw_connection_->extra().rtt * 1.5 + 1);
   }
 
+  // tdesktop constants: kPingSendAfter = 30s, kPingSendAfterForce = 45s, kPingDelayDisconnect = 60
   double read_disconnect_delay() const {
-    return online_flag_ ? rtt() * 3.5 : 135 + random_delay_;
+    return 120;
   }
 
   double ping_disconnect_delay() const {
-    return online_flag_ && is_main_ ? rtt() * 2.5 : 135 + random_delay_;
+    return 60;
   }
 
   double ping_may_delay() const {
-    return online_flag_ ? rtt() * 0.5 : 30 + random_delay_;
+    return 30;
   }
 
   double ping_must_delay() const {
-    return online_flag_ ? rtt() : 60 + random_delay_;
+    return 45;
   }
 
   double http_max_wait() const {
@@ -185,7 +186,6 @@ class SessionConnection final
   // nobody cleans up this map. But it should be really small.
   FlatHashMap<MessageId, vector<MessageId>, MessageIdHash> container_to_service_message_id_;
 
-  double random_delay_ = 0;
   double last_read_at_ = 0;
   double last_ping_at_ = 0;
   double last_pong_at_ = 0;

@@ -254,7 +254,7 @@ Session::Session(unique_ptr<Callback> callback, std::shared_ptr<AuthDataShared> 
   if (use_pfs && !tmp_auth_key.empty()) {
     auth_data_.set_tmp_auth_key(tmp_auth_key);
     if (is_main_) {
-      registered_temp_auth_key_ = TempAuthKeyWatchdog::register_auth_key_id(auth_data_.get_tmp_auth_key().id());
+      // tdesktop never sends auth.dropTempAuthKeys
     }
     auth_data_.set_future_salts(server_salts, now);
   }
@@ -1410,7 +1410,7 @@ void Session::on_handshake_ready(Result<unique_ptr<mtproto::AuthKeyHandshake>> r
       } else {
         auth_data_.set_tmp_auth_key(handshake->release_auth_key());
         if (is_main_) {
-          registered_temp_auth_key_ = TempAuthKeyWatchdog::register_auth_key_id(auth_data_.get_tmp_auth_key().id());
+          // tdesktop never sends auth.dropTempAuthKeys
         }
         on_tmp_auth_key_updated();
       }
@@ -1442,7 +1442,7 @@ void Session::create_gen_auth_key_actor(HandshakeId handshake_id) {
   info.flag_ = true;
   bool is_main = handshake_id == MainAuthKeyHandshake;
   if (!info.handshake_) {
-    auto key_validity_time = is_main && !is_cdn_ ? 0 : Random::fast(23 * 60 * 60, 24 * 60 * 60);
+    auto key_validity_time = is_main && !is_cdn_ ? 0 : 24 * 60 * 60;  // tdesktop kTemporaryExpiresIn
     info.handshake_ = make_unique<mtproto::AuthKeyHandshake>(dc_id_, key_validity_time);
   }
   class AuthKeyHandshakeContext final : public mtproto::AuthKeyHandshakeContext {

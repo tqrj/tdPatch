@@ -82,7 +82,8 @@ NetQueryPtr NetQueryCreator::create(uint64 id, const telegram_api::object_ptr<te
     }
   }
 
-  auto gzip_flag = slice.size() < min_gzipped_size ? NetQuery::GzipFlag::Off : NetQuery::GzipFlag::On;
+  auto gzip_flag = NetQuery::GzipFlag::Off;  // tdesktop never gzips outgoing requests
+  (void)min_gzipped_size;
   if (slice.size() >= 16384) {
     // test compression ratio for the middle part
     // if it is less than 0.9, then try to compress the whole request

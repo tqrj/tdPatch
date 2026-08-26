@@ -766,8 +766,7 @@ void SessionConnection::on_read(size_t size) {
 }
 
 SessionConnection::SessionConnection(Mode mode, unique_ptr<RawConnection> raw_connection, AuthData *auth_data)
-    : random_delay_(Random::fast(0, 5000000) * 1e-6)
-    , state_(Init)
+    : state_(Init)
     , mode_(mode)
     , created_at_(Time::now())
     , raw_connection_(std::move(raw_connection))
@@ -1028,7 +1027,7 @@ void SessionConnection::flush_packet() {
     // LOG(ERROR) << (auth_data_->get_header().empty() ? '-' : '+');
     MessageId parent_message_id;
     auto storer = PacketStorer<CryptoImpl>(
-        queries, auth_data_->get_header(), std::move(to_ack), ping_id, static_cast<int>(ping_disconnect_delay() + 2.0),
+        queries, auth_data_->get_header(), std::move(to_ack), ping_id, static_cast<int>(ping_disconnect_delay()),
         max_delay, max_after, max_wait, future_salt_n, to_get_state_info, to_resend_answer, to_cancel_answer,
         destroy_auth_key, auth_data_, &container_message_id, &get_state_info_message_id, &resend_answer_message_id,
         &ping_message_id, &parent_message_id);
