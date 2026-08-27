@@ -179,7 +179,9 @@ size_t do_calc_crypto_size2_basic(size_t data_size, size_t enc_size, size_t raw_
 }
 
 size_t do_calc_crypto_size2_rand(size_t data_size, size_t enc_size, size_t raw_size) {
-  size_t rand_data_size = 12 + Random::secure_uint32() % (1024 - 12 + 1);  // tdesktop: 12..1024
+  // tdesktop (CountPaddingPrimesCount): 12..24 bytes of alignment padding plus (rand & 0x0F) * 16 bytes,
+  // i.e. 12..264 bytes in total. The +12 and the 16-byte alignment below supply the first part.
+  size_t rand_data_size = (Random::secure_uint32() & 0x0F) * 16;
   size_t encrypted_size = (enc_size + data_size + rand_data_size + 12 + 15) & ~15;
   return raw_size + encrypted_size;
 }

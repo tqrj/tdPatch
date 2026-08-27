@@ -148,7 +148,9 @@ class SessionConnection final
 
   // tdesktop constants: kPingSendAfter = 30s, kPingSendAfterForce = 45s, kPingDelayDisconnect = 60
   double read_disconnect_delay() const {
-    return 120;
+    // Non-main sessions are not kept alive by pings any more, so don't let an idle one look dead here;
+    // Session::ACTIVITY_TIMEOUT (300s) closes it, like tdesktop's idle media sessions.
+    return is_main_ ? 120 : 300;
   }
 
   double ping_disconnect_delay() const {

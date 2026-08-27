@@ -910,12 +910,16 @@ void SessionConnection::send_ack(MessageId message_id) {
 }
 
 // don't send ping in poll mode
+// tdesktop pings periodically only on the main session (session_private.cpp: _pingSender is armed only when
+// !_sessionData->isMainSession() is false); media/upload sessions send a single ping right after connecting.
 bool SessionConnection::may_ping() const {
-  return last_ping_at_ == 0 || (mode_ != Mode::HttpLongPoll && last_ping_at_ + ping_may_delay() < Time::now_cached());
+  return last_ping_at_ == 0 ||
+         (is_main_ && mode_ != Mode::HttpLongPoll && last_ping_at_ + ping_may_delay() < Time::now_cached());
 }
 
 bool SessionConnection::must_ping() const {
-  return last_ping_at_ == 0 || (mode_ != Mode::HttpLongPoll && last_ping_at_ + ping_must_delay() < Time::now_cached());
+  return last_ping_at_ == 0 ||
+         (is_main_ && mode_ != Mode::HttpLongPoll && last_ping_at_ + ping_must_delay() < Time::now_cached());
 }
 
 void SessionConnection::flush_packet() {
@@ -1105,7 +1109,9 @@ Status SessionConnection::do_flush() {
     return result;
   }
 
-  if (last_pong_at_ + ping_disconnect_delay() < Time::now_cached()) {
+  // Non-main sessions stop pinging after the first one, so a missing pong only means something when a ping
+  // is actually outstanding there; otherwise they are closed by Session's activity timeout, not by us.
+  if (last_pong_at_ + ping_disconnect_delay() < Time::now_cached() && (is_main_ || last_ping_at_ > last_pong_at_)) {
     auto stats_callback = raw_connection_->stats_callback();
     if (stats_callback != nullptr) {
       stats_callback->on_error();
