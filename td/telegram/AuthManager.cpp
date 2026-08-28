@@ -349,8 +349,15 @@ AuthManager::AuthManager(int32 api_id, const string &api_hash, ActorShared<> par
       update_state(State::Ok);
     } else {
       LOG(ERROR) << "Restore unknown my_id";
-      UserManager::send_get_me_query(td_,
-                                     PromiseCreator::lambda([this](Result<Unit> result) { update_state(State::Ok); }));
+      UserManager::send_get_me_query(td_, PromiseCreator::lambda([this](Result<Unit> result) {
+        // Imported sessions (Telethon and friends) carry auth=ok without my_id. Managers already
+        // ran their init() while we were not authorized and skipped everything gated on it, so
+        // replay the same post-authorization sequence as on_get_authorization(); otherwise the
+        // dialog folders never exist and the first new dialog aborts on CHECK(folder_ptr != nullptr).
+        update_state(State::Ok);
+        td_->messages_manager_->on_authorization_success();
+        init_managers_after_authorization();
+      }));
     }
     G()->net_query_dispatcher().check_authorization_is_ok();
   } else if (auth_str == "logout") {
@@ -1539,6 +1546,11 @@ void AuthManager::on_get_authorization(tl_object_ptr<telegram_api::auth_Authoriz
     td_->option_manager_->set_option_string("authentication_token",
                                             base64url_encode(auth->future_auth_token_.as_slice()));
   }
+  init_managers_after_authorization();
+  on_current_query_ok();
+}
+
+void AuthManager::init_managers_after_authorization() {
   td_->attach_menu_manager_->init();
   td_->dialog_filter_manager_->on_authorization_success();  // must be after MessagesManager::on_authorization_success()
                                                             // to have folders created
@@ -1558,7 +1570,6 @@ void AuthManager::on_get_authorization(tl_object_ptr<telegram_api::auth_Authoriz
     G()->td_db()->get_binlog_pmc()->set("fetched_marks_as_unread", "1");
   }
   send_closure(G()->config_manager(), &ConfigManager::request_config, false);
-  on_current_query_ok();
 }
 
 void AuthManager::on_result(NetQueryPtr net_query) {

@@ -299,6 +299,8 @@ class AuthManager final : public NetActor {
   void on_get_login_token(tl_object_ptr<telegram_api::auth_LoginToken> login_token);
   void on_get_authorization(tl_object_ptr<telegram_api::auth_Authorization> auth_ptr);
 
+  void init_managers_after_authorization();
+
   void on_result(NetQueryPtr net_query) final;
 
   void update_state(State new_state, bool should_save_state = true);
