@@ -350,6 +350,12 @@ AuthManager::AuthManager(int32 api_id, const string &api_hash, ActorShared<> par
     } else {
       LOG(ERROR) << "Restore unknown my_id";
       UserManager::send_get_me_query(td_, PromiseCreator::lambda([this](Result<Unit> result) {
+        // Closing Td fails the pending getUsers and lands here too (the account never got online,
+        // e.g. its proxy is dead, and the client gave up). The managers below create new queries,
+        // which aborts on CHECK(close_flag_ < 2) in Td::create_handler; reporting Ok is a lie as well.
+        if (G()->close_flag()) {
+          return;
+        }
         // Imported sessions (Telethon and friends) carry auth=ok without my_id. Managers already
         // ran their init() while we were not authorized and skipped everything gated on it, so
         // replay the same post-authorization sequence as on_get_authorization(); otherwise the
