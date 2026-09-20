@@ -689,7 +689,11 @@ bool SessionConnection::must_flush_packet() {
     if (must_ping()) {
       return true;
     }
-    relax_timeout_at(&flush_packet_at_, last_ping_at_ + ping_must_delay());
+    // Non-main sessions never ping again after the first one (see must_ping), so this moment would stay
+    // in the past forever and make Session::loop spin.
+    if (is_main_) {
+      relax_timeout_at(&flush_packet_at_, last_ping_at_ + ping_must_delay());
+    }
   }
   // get_future_salt
   if (!has_salt) {
@@ -1148,7 +1152,10 @@ double SessionConnection::flush(SessionConnection::Callback *callback) {
   // 1. close connection after ping_disconnect_delay() after last pong
   // 2. close connection after read_disconnect_delay() after last read
   // 3. the one returned by must_flush_packet
-  relax_timeout_at(&wakeup_at, last_pong_at_ + ping_disconnect_delay() + 0.002);
+  // must match the ping timeout condition in do_flush: waking up for a timeout that do_flush ignores is a busy loop
+  if (is_main_ || last_ping_at_ > last_pong_at_) {
+    relax_timeout_at(&wakeup_at, last_pong_at_ + ping_disconnect_delay() + 0.002);
+  }
   relax_timeout_at(&wakeup_at, last_read_at_ + read_disconnect_delay() + 0.002);
   relax_timeout_at(&wakeup_at, flush_packet_at_);
 

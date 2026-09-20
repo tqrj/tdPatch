@@ -1575,6 +1575,11 @@ void Session::loop() {
 
   relax_timeout_at(&wakeup_at, main_connection_.wakeup_at_);
 
+  // A moment that had already passed before this loop started was not handled by it, so it never will be:
+  // don't let a stale timestamp turn into a busy loop that also starves the scheduler's poll.
+  if (wakeup_at != 0 && wakeup_at <= now) {
+    wakeup_at = now + 0.1;
+  }
   if (wakeup_at != 0) {
     set_timeout_at(wakeup_at);
   }
