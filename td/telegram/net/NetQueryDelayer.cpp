@@ -5,6 +5,7 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 #include "td/telegram/net/NetQueryDelayer.h"
+#include "td/telegram/net/RetryAfter.h"
 
 #include "td/telegram/Global.h"
 #include "td/telegram/net/NetQueryDispatcher.h"
@@ -102,7 +103,7 @@ void NetQueryDelayer::delay(NetQueryPtr query) {
     LOG(WARNING) << "Failed: " << query << " " << tag("timeout", timeout) << tag("total_timeout", query->total_timeout_)
                  << " because of " << error << " from " << query->source_;
     // NB: code must differ from tdapi FLOOD_WAIT code
-    query->set_error(Status::Error(429, PSLICE() << "Too Many Requests: retry after " << timeout));
+    query->set_error(retry_after_error(error, timeout));
     query->debug("DcManager: send to DcManager");
     G()->net_query_dispatcher().dispatch(std::move(query));
     return;

@@ -28105,7 +28105,8 @@ bool MessagesManager::process_send_message_fail_error(int32 &error_code, string 
       LOG(ERROR) << "Receive error 420: " << error_message;
       break;
     case 429:
-      if (!begins_with(error_message, "Too Many Requests: retry after ")) {
+      if (!begins_with(error_message, "Too Many Requests: retry after ") &&
+          Global::get_retry_after(error_code, error_message) == 0) {
         LOG(ERROR) << "Wrong error message: " << error_message;
       }
       break;

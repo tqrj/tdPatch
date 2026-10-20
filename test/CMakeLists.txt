@@ -49,6 +49,10 @@ if (NOT CMAKE_CROSSCOMPILING OR EMSCRIPTEN)
     endif()
   endif()
 
+  add_executable(test-retry-after EXCLUDE_FROM_ALL ${TESTS_MAIN} retry_after.cpp)
+  target_include_directories(test-retry-after PRIVATE ${PROJECT_SOURCE_DIR})
+  target_link_libraries(test-retry-after PRIVATE tdutils)
+
   add_executable(test-tdutils EXCLUDE_FROM_ALL ${TESTS_MAIN} ${TDUTILS_TEST_SOURCE})
   add_executable(test-online EXCLUDE_FROM_ALL online.cpp)
   add_executable(run_all_tests ${TESTS_MAIN} ${TD_TEST_SOURCE})

@@ -36,6 +36,8 @@ jobs:
           # GCC >= 15 默认 C23，自带 tl-parser 的 K&R 风格 getopt 声明会编译失败，钉回 gnu11
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-std=gnu11" -DCMAKE_INSTALL_PREFIX="$TD_PREFIX" ..
           cmake --build . --target install
+          cmake --build . --target test-retry-after
+          ./test/test-retry-after.exe
 
       # 把 libtdjson.dll 的 MinGW 运行时依赖（openssl/zlib/libstdc++ 等）一并收进 bin/，
       # 下游不必再装这些包，也避免与编译时的版本错位
@@ -83,6 +85,8 @@ jobs:
           cmake -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" -DCMAKE_INSTALL_PREFIX="$PWD/../tdlib" ..
           # ponytail: 标准 runner 只有 7GB 内存，TDLib 单个编译单元吃 2GB+，并发压到 3；换大 runner 可去掉
           cmake --build . --target install --parallel 3
+          cmake --build . --target test-retry-after --parallel 3
+          ./test/test-retry-after
 
       - name: 打包
         run: tar -czf tdlib-macos-arm64.tar.gz -C tdlib .
