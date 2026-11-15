@@ -33,6 +33,7 @@ namespace td {
 class AccountManager;
 class AnimationsManager;
 class AttachMenuManager;
+class AudiosManager;
 class AuthManager;
 class AutosaveManager;
 class BackgroundManager;
@@ -90,6 +91,7 @@ class TdDb;
 class TempAuthKeyWatchdog;
 class ThemeManager;
 class TimeZoneManager;
+class TonWalletManager;
 class TopDialogManager;
 class TranscriptionManager;
 class TranslationManager;
@@ -98,7 +100,9 @@ class UserManager;
 class WebAppManager;
 class WebBrowserManager;
 class WebPagesManager;
+class WebProxyManager;
 class WelcomeMessageManager;
+class WidgetManager;
 
 class Global final : public ActorContext {
  public:
@@ -224,6 +228,13 @@ class Global final : public ActorContext {
   }
   void set_attach_menu_manager(ActorId<AttachMenuManager> attach_menu_manager) {
     attach_menu_manager_ = attach_menu_manager;
+  }
+
+  ActorId<AudiosManager> audios_manager() const {
+    return audios_manager_;
+  }
+  void set_audios_manager(ActorId<AudiosManager> audios_manager) {
+    audios_manager_ = audios_manager;
   }
 
   ActorId<AuthManager> auth_manager() const {
@@ -574,6 +585,13 @@ class Global final : public ActorContext {
     time_zone_manager_ = time_zone_manager;
   }
 
+  ActorId<TonWalletManager> ton_wallet_manager() const {
+    return ton_wallet_manager_;
+  }
+  void set_ton_wallet_manager(ActorId<TonWalletManager> ton_wallet_manager) {
+    ton_wallet_manager_ = ton_wallet_manager;
+  }
+
   ActorId<TopDialogManager> top_dialog_manager() const {
     return top_dialog_manager_;
   }
@@ -630,11 +648,25 @@ class Global final : public ActorContext {
     web_pages_manager_ = web_pages_manager;
   }
 
+  ActorId<WebProxyManager> web_proxy_manager() const {
+    return web_proxy_manager_;
+  }
+  void set_web_proxy_manager(ActorId<WebProxyManager> web_proxy_manager) {
+    web_proxy_manager_ = web_proxy_manager;
+  }
+
   ActorId<WelcomeMessageManager> welcome_message_manager() const {
     return welcome_message_manager_;
   }
   void set_welcome_message_manager(ActorId<WelcomeMessageManager> welcome_message_manager) {
     welcome_message_manager_ = welcome_message_manager;
+  }
+
+  ActorId<WidgetManager> widget_manager() const {
+    return widget_manager_;
+  }
+  void set_widget_manager(ActorId<WidgetManager> widget_manager) {
+    widget_manager_ = widget_manager;
   }
 
   ActorId<ConnectionCreator> connection_creator() const;
@@ -769,6 +801,7 @@ class Global final : public ActorContext {
   ActorId<AccountManager> account_manager_;
   ActorId<AnimationsManager> animations_manager_;
   ActorId<AttachMenuManager> attach_menu_manager_;
+  ActorId<AudiosManager> audios_manager_;
   ActorId<AuthManager> auth_manager_;
   ActorId<AutosaveManager> autosave_manager_;
   ActorId<BackgroundManager> background_manager_;
@@ -818,6 +851,7 @@ class Global final : public ActorContext {
   ActorId<SuggestedActionManager> suggested_action_manager_;
   ActorId<ThemeManager> theme_manager_;
   ActorId<TimeZoneManager> time_zone_manager_;
+  ActorId<TonWalletManager> ton_wallet_manager_;
   ActorId<TopDialogManager> top_dialog_manager_;
   ActorId<TranscriptionManager> transcription_manager_;
   ActorId<TranslationManager> translation_manager_;
@@ -826,7 +860,9 @@ class Global final : public ActorContext {
   ActorId<WebAppManager> web_app_manager_;
   ActorId<WebBrowserManager> web_browser_manager_;
   ActorId<WebPagesManager> web_pages_manager_;
+  ActorId<WebProxyManager> web_proxy_manager_;
   ActorId<WelcomeMessageManager> welcome_message_manager_;
+  ActorId<WidgetManager> widget_manager_;
   ActorOwn<ConnectionCreator> connection_creator_;
   ActorOwn<TempAuthKeyWatchdog> temp_auth_key_watchdog_;
 

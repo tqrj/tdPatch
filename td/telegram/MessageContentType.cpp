@@ -204,6 +204,14 @@ StringBuilder &operator<<(StringBuilder &string_builder, MessageContentType cont
       return string_builder << "ChangeCommunity";
     case MessageContentType::ChatJoinedViaCommunity:
       return string_builder << "ChatJoinedViaCommunity";
+    case MessageContentType::GramTransfer:
+      return string_builder << "GramTransfer";
+    case MessageContentType::WalletTonConnectRequest:
+      return string_builder << "WalletTonConnectRequest";
+    case MessageContentType::UnpaidMessagesAllowedByLink:
+      return string_builder << "UnpaidMessagesAllowedByLink";
+    case MessageContentType::Widget:
+      return string_builder << "Widget";
     default:
       return string_builder << "Invalid type " << static_cast<int32>(content_type);
   }
@@ -215,6 +223,7 @@ bool is_allowed_invert_caption_message_content(MessageContentType content_type) 
     case MessageContentType::PaidMedia:
     case MessageContentType::Photo:
     case MessageContentType::Video:
+    case MessageContentType::Widget:
       return true;
     default:
       return false;
@@ -239,6 +248,7 @@ bool is_allowed_media_group_content(MessageContentType content_type) {
     case MessageContentType::Sticker:
     case MessageContentType::Text:
     case MessageContentType::Unsupported:
+    case MessageContentType::Widget:
     case MessageContentType::Venue:
     case MessageContentType::VideoNote:
     case MessageContentType::VoiceNote:
@@ -320,6 +330,9 @@ bool is_allowed_media_group_content(MessageContentType content_type) {
     case MessageContentType::RichText:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return false;
     default:
       UNREACHABLE();
@@ -426,6 +439,7 @@ bool can_be_secret_message_content(MessageContentType content_type) {
     case MessageContentType::Sticker:
     case MessageContentType::Text:
     case MessageContentType::Unsupported:
+    case MessageContentType::Widget:
     case MessageContentType::Venue:
     case MessageContentType::ExpiredPhoto:
     case MessageContentType::ExpiredVideo:
@@ -507,6 +521,9 @@ bool can_be_secret_message_content(MessageContentType content_type) {
     case MessageContentType::RichText:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return false;
     default:
       UNREACHABLE();
@@ -524,17 +541,18 @@ bool can_be_local_message_content(MessageContentType content_type) {
     case MessageContentType::Photo:
     case MessageContentType::RichText:
     case MessageContentType::Sticker:
+    case MessageContentType::Story:
     case MessageContentType::Text:
     case MessageContentType::Venue:
     case MessageContentType::Video:
     case MessageContentType::VideoNote:
     case MessageContentType::VoiceNote:
-    case MessageContentType::Story:
       return true;
     case MessageContentType::Game:
     case MessageContentType::Invoice:
     case MessageContentType::LiveLocation:
     case MessageContentType::Unsupported:
+    case MessageContentType::Widget:
     case MessageContentType::ExpiredPhoto:
     case MessageContentType::ExpiredVideo:
     case MessageContentType::ChatCreate:
@@ -613,6 +631,9 @@ bool can_be_local_message_content(MessageContentType content_type) {
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return false;
     default:
       UNREACHABLE();
@@ -650,6 +671,7 @@ bool is_service_message_content(MessageContentType content_type) {
     case MessageContentType::Video:
     case MessageContentType::VideoNote:
     case MessageContentType::VoiceNote:
+    case MessageContentType::Widget:
       return false;
     case MessageContentType::ChatCreate:
     case MessageContentType::ChatChangeTitle:
@@ -719,6 +741,9 @@ bool is_service_message_content(MessageContentType content_type) {
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return true;
     default:
       UNREACHABLE();
@@ -739,6 +764,7 @@ bool is_editable_message_content(MessageContentType content_type) {
     case MessageContentType::ToDoList:
     case MessageContentType::Video:
     case MessageContentType::VoiceNote:
+    case MessageContentType::Widget:
       return true;
     case MessageContentType::LiveLocation:
     case MessageContentType::Poll:
@@ -825,6 +851,9 @@ bool is_editable_message_content(MessageContentType content_type) {
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return false;
     default:
       UNREACHABLE();
@@ -869,6 +898,7 @@ bool is_supported_reply_message_content(MessageContentType content_type) {
     case MessageContentType::Video:
     case MessageContentType::VideoNote:
     case MessageContentType::VoiceNote:
+    case MessageContentType::Widget:
       // update documentation when the list changes
       return true;
     case MessageContentType::ExpiredPhoto:
@@ -919,6 +949,7 @@ bool can_have_message_content_caption(MessageContentType content_type) {
     case MessageContentType::Photo:
     case MessageContentType::Video:
     case MessageContentType::VoiceNote:
+    case MessageContentType::Widget:
       return true;
     case MessageContentType::Contact:
     case MessageContentType::Game:
@@ -1009,6 +1040,9 @@ bool can_have_message_content_caption(MessageContentType content_type) {
     case MessageContentType::RichText:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return false;
     default:
       UNREACHABLE();
@@ -1042,6 +1076,7 @@ bool can_send_message_content_to_secret_chat(MessageContentType content_type) {
     case MessageContentType::RichText:
     case MessageContentType::Story:
     case MessageContentType::ToDoList:
+    case MessageContentType::Widget:
       return false;
     case MessageContentType::None:
     case MessageContentType::ChatCreate:
@@ -1117,6 +1152,9 @@ bool can_send_message_content_to_secret_chat(MessageContentType content_type) {
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
     default:
       UNREACHABLE();
       return false;
@@ -1171,6 +1209,7 @@ bool get_default_service_message_content_reactions_are_possible(MessageContentTy
     case MessageContentType::Video:
     case MessageContentType::VideoNote:
     case MessageContentType::VoiceNote:
+    case MessageContentType::Widget:
     case MessageContentType::ChatCreate:
     case MessageContentType::ChatDeleteHistory:
     case MessageContentType::ChatMigrateTo:
@@ -1185,6 +1224,7 @@ bool get_default_service_message_content_reactions_are_possible(MessageContentTy
     case MessageContentType::GiveawayLaunch:
     case MessageContentType::DialogShared:
     case MessageContentType::GiftTon:
+    case MessageContentType::WalletTonConnectRequest:
       return false;
     case MessageContentType::ChatChangeTitle:
     case MessageContentType::ChatChangePhoto:
@@ -1240,6 +1280,8 @@ bool get_default_service_message_content_reactions_are_possible(MessageContentTy
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return true;
     default:
       UNREACHABLE();

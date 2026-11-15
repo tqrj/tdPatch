@@ -467,6 +467,7 @@ bool DialogAction::is_canceled_by_message_of_type(MessageContentType message_con
     case MessageContentType::Invoice:
     case MessageContentType::Text:
     case MessageContentType::Unsupported:
+    case MessageContentType::Widget:
     case MessageContentType::ChatCreate:
     case MessageContentType::ChatChangeTitle:
     case MessageContentType::ChatChangePhoto:
@@ -542,6 +543,9 @@ bool DialogAction::is_canceled_by_message_of_type(MessageContentType message_con
     case MessageContentType::RichText:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return false;
     default:
       UNREACHABLE();

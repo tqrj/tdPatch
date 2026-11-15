@@ -34,6 +34,7 @@
 #include "td/telegram/EmojiStatus.h"
 #include "td/telegram/EphemeralMessageId.h"
 #include "td/telegram/FolderId.h"
+#include "td/telegram/ForumTopicEditedData.h"
 #include "td/telegram/ForumTopicId.h"
 #include "td/telegram/ForumTopicManager.h"
 #include "td/telegram/Global.h"
@@ -92,6 +93,7 @@
 #include "td/telegram/ThemeManager.h"
 #include "td/telegram/TimeZoneManager.h"
 #include "td/telegram/TonAmount.h"
+#include "td/telegram/TonWalletManager.h"
 #include "td/telegram/TranscriptionManager.h"
 #include "td/telegram/TranslationManager.h"
 #include "td/telegram/UserManager.h"
@@ -100,6 +102,7 @@
 #include "td/telegram/WebBrowserManager.h"
 #include "td/telegram/WebPagesManager.h"
 #include "td/telegram/WelcomeMessageManager.h"
+#include "td/telegram/WidgetManager.h"
 
 #include "td/actor/MultiPromise.h"
 #include "td/actor/PromiseFuture.h"
@@ -1000,6 +1003,9 @@ bool UpdatesManager::is_acceptable_message(const telegram_api::Message *message_
         case telegram_api::messageActionPollAppendAnswer::ID:
         case telegram_api::messageActionPollDeleteAnswer::ID:
         case telegram_api::messageActionManagedBotCreated::ID:
+        case telegram_api::messageActionGramTransfer::ID:
+        case telegram_api::messageActionWalletTonConnectRequest::ID:
+        case telegram_api::messageActionNoPaidMessagesTokenUsed::ID:
           break;
         case telegram_api::messageActionChatCreate::ID: {
           auto action = static_cast<const telegram_api::messageActionChatCreate *>(action_ptr);
@@ -1507,7 +1513,8 @@ bool UpdatesManager::is_additional_service_message(const telegram_api::Message *
     return false;
   }
   auto action_id = static_cast<const telegram_api::messageService *>(message)->action_->get_id();
-  return action_id == telegram_api::messageActionSetMessagesTTL::ID;
+  return action_id == telegram_api::messageActionSetMessagesTTL::ID ||
+         action_id == telegram_api::messageActionNoPaidMessagesTokenUsed::ID;
 }
 
 vector<std::pair<const telegram_api::Message *, bool>> UpdatesManager::get_new_messages(
@@ -1656,6 +1663,17 @@ telegram_api::object_ptr<telegram_api::StoryItem> UpdatesManager::extract_story(
           (is_business || update->story_->get_id() == telegram_api::storyItem::ID)) {
         return std::move(update->story_);
       }
+    }
+  }
+  return nullptr;
+}
+
+telegram_api::object_ptr<telegram_api::updateSentWalletTransaction> UpdatesManager::extract_sent_wallet_transaction(
+    telegram_api::Updates *updates_ptr) {
+  auto updates = get_updates(updates_ptr);
+  for (auto it = updates->begin(); it != updates->end(); ++it) {
+    if ((*it)->get_id() == telegram_api::updateSentWalletTransaction::ID) {
+      return telegram_api::move_object_as<telegram_api::updateSentWalletTransaction>(*it);
     }
   }
   return nullptr;
@@ -2460,6 +2478,7 @@ void UpdatesManager::try_reload_data() {
   td_->theme_manager_->reload_chat_themes();
   td_->theme_manager_->reload_profile_accent_colors();
   td_->time_zone_manager_->reload_time_zones(Auto());
+  td_->ton_wallet_manager_->get_wallet_state(Auto());
   td_->translation_manager_->reload_ai_compose_tones(Auto());
   td_->user_manager_->reload_contact_birthdates(false);
   td_->user_manager_->reload_my_saved_music_list(Auto());
@@ -4006,11 +4025,29 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updatePinnedForumTopi
   promise.set_value(Unit());
 }
 
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateEditForumTopic> update, Promise<Unit> &&promise) {
+  auto edit_icon_custom_emoji_id = (update->flags_ & telegram_api::updateEditForumTopic::ICON_EMOJI_ID_MASK) != 0;
+  auto edit_is_closed = (update->flags_ & telegram_api::updateEditForumTopic::CLOSED_MASK) != 0;
+  auto edit_is_hidden = (update->flags_ & telegram_api::updateEditForumTopic::HIDDEN_MASK) != 0;
+  td_->forum_topic_manager_->on_update_forum_topic_edited(
+      DialogId(update->peer_), ForumTopicId(update->topic_id_),
+      ForumTopicEditedData{std::move(update->title_), edit_icon_custom_emoji_id, update->icon_emoji_id_, edit_is_closed,
+                           update->closed_, edit_is_hidden, update->hidden_});
+  promise.set_value(Unit());
+}
+
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updatePinnedMessages> update, Promise<Unit> &&promise) {
   int new_pts = update->pts_;
   int pts_count = update->pts_count_;
   add_pending_pts_update(std::move(update), new_pts, pts_count, Time::now(), std::move(promise),
                          "updatePinnedMessages");
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateMessageWidgetData> update, Promise<Unit> &&promise) {
+  int new_pts = update->pts_;
+  int pts_count = update->pts_count_;
+  add_pending_pts_update(std::move(update), new_pts, pts_count, Time::now(), std::move(promise),
+                         "updateMessageWidgetData");
 }
 
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updatePinnedChannelMessages> update,
@@ -4059,8 +4096,17 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateNotifySettings>
       }
       break;
     }
-    case telegram_api::notifyCommunity::ID:
+    case telegram_api::notifyCommunity::ID: {
+      auto notify_community = static_cast<const telegram_api::notifyCommunity *>(update->peer_.get());
+      CommunityId community_id(notify_community->community_id_);
+      if (community_id.is_valid()) {
+        td_->community_manager_->on_update_community_notify_settings(community_id, std::move(update->notify_settings_),
+                                                                     "updateNotifySettings");
+      } else {
+        LOG(ERROR) << "Receive wrong " << to_string(update);
+      }
       break;
+    }
     default:
       UNREACHABLE();
   }
@@ -4204,6 +4250,10 @@ bool UpdatesManager::check_pts_update(const tl_object_ptr<telegram_api::Update> 
       auto update_pinned_messages = static_cast<const telegram_api::updatePinnedMessages *>(update.get());
       return check_pts_update_dialog_id(DialogId(update_pinned_messages->peer_));
     }
+    case telegram_api::updateMessageWidgetData::ID: {
+      auto update_message_widget_data = static_cast<const telegram_api::updateMessageWidgetData *>(update.get());
+      return check_pts_update_dialog_id(DialogId(update_message_widget_data->peer_));
+    }
     default:
       return false;
   }
@@ -4220,6 +4270,7 @@ bool UpdatesManager::is_pts_update(const telegram_api::Update *update) {
     case telegram_api::updateWebPage::ID:
     case telegram_api::updatePinnedMessages::ID:
     case telegram_api::updateFolderPeers::ID:
+    case telegram_api::updateMessageWidgetData::ID:
       return true;
     default:
       return false;
@@ -4246,6 +4297,8 @@ int32 UpdatesManager::get_update_pts(const telegram_api::Update *update) {
       return static_cast<const telegram_api::updatePinnedMessages *>(update)->pts_;
     case telegram_api::updateFolderPeers::ID:
       return static_cast<const telegram_api::updateFolderPeers *>(update)->pts_;
+    case telegram_api::updateMessageWidgetData::ID:
+      return static_cast<const telegram_api::updateMessageWidgetData *>(update)->pts_;
     default:
       return 0;
   }
@@ -4974,6 +5027,12 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateTranscribedAudi
   promise.set_value(Unit());
 }
 
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateTranscribedAudioFile> update,
+                               Promise<Unit> &&promise) {
+  td_->transcription_manager_->on_update_transcribed_audio_file(std::move(update));
+  promise.set_value(Unit());
+}
+
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateAutoSaveSettings> update, Promise<Unit> &&promise) {
   td_->autosave_manager_->reload_autosave_settings();
   promise.set_value(Unit());
@@ -5106,6 +5165,36 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateStarsBalance> u
   promise.set_value(Unit());
 }
 
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateWalletState> update, Promise<Unit> &&promise) {
+  td_->ton_wallet_manager_->on_update_wallet_state(std::move(update->state_));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateWalletGaslessInfo> update, Promise<Unit> &&promise) {
+  td_->ton_wallet_manager_->on_update_wallet_gasless_info(std::move(update));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateSentWalletTransaction> update,
+                               Promise<Unit> &&promise) {
+  LOG(INFO) << "Ignore unexpected " << to_string(update);
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateWalletTonConnectSession> update,
+                               Promise<Unit> &&promise) {
+  td_->ton_wallet_manager_->on_update_wallet_ton_connect_session(std::move(update->session_));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateWalletTonConnectPendingDisconnect> update,
+                               Promise<Unit> &&promise) {
+  send_closure(
+      G()->td(), &Td::send_update,
+      td_api::make_object<td_api::updateTonWalletTonConnectSessionDisconnectRequired>(std::move(update->session_ids_)));
+  promise.set_value(Unit());
+}
+
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateStarsRevenueStatus> update, Promise<Unit> &&promise) {
   auto dialog_id = DialogId(update->peer_);
   switch (update->status_->current_balance_->get_id()) {
@@ -5138,6 +5227,30 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateWebBrowserSetti
 
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateWebBrowserException> update, Promise<Unit> &&promise) {
   td_->web_browser_manager_->on_update_web_browser_exception(std::move(update));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBotWidgetQuery> update, Promise<Unit> &&promise) {
+  td_->widget_manager_->on_new_widget_query(
+      update->query_id_, std::move(update->query_type_), UserId(update->user_id_), DialogId(update->peer_),
+      MessageId(ServerMessageId(update->msg_id_)), std::move(update->data_), update->chat_instance_,
+      std::move(update->chat_type_), update->widget_id_, std::move(update->wallet_card_));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateInlineBotWidgetQuery> update,
+                               Promise<Unit> &&promise) {
+  td_->widget_manager_->on_new_inline_widget_query(
+      update->query_id_, std::move(update->query_type_), UserId(update->user_id_),
+      std::move(update->inline_message_id_), std::move(update->data_), update->chat_instance_,
+      std::move(update->chat_type_), update->widget_id_, std::move(update->wallet_card_));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBotWidgetCopyQuery> update, Promise<Unit> &&promise) {
+  td_->widget_manager_->on_new_widget_copy_query(update->query_id_, std::move(update->query_type_),
+                                                 UserId(update->user_id_), std::move(update->data_), update->widget_id_,
+                                                 std::move(update->wallet_card_));
   promise.set_value(Unit());
 }
 

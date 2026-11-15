@@ -122,8 +122,8 @@ unique_ptr<ReplyMarkup> get_reply_markup(telegram_api::object_ptr<telegram_api::
         vector<InlineKeyboardButton> buttons;
         buttons.reserve(row->buttons_.size());
         for (auto &button : row->buttons_) {
-          buttons.push_back(get_inline_keyboard_button(std::move(button)));
-          if (buttons.back().text.empty() && !buttons.back().style.get_icon_custom_emoji_id().is_valid()) {
+          buttons.emplace_back(std::move(button));
+          if (buttons.back().is_empty()) {
             buttons.pop_back();
           }
         }
@@ -275,7 +275,8 @@ static Result<unique_ptr<ReplyMarkup>> get_reply_markup(td_api::object_ptr<td_ap
             continue;
           }
 
-          TRY_RESULT(current_button, get_inline_keyboard_button(std::move(button), switch_inline_buttons_allowed));
+          TRY_RESULT(current_button, InlineKeyboardButton::get_inline_keyboard_button(std::move(button),
+                                                                                      switch_inline_buttons_allowed));
 
           row_buttons.push_back(std::move(current_button));
           row_button_count++;
@@ -381,7 +382,7 @@ telegram_api::object_ptr<telegram_api::ReplyMarkup> ReplyMarkup::get_input_reply
         vector<telegram_api::object_ptr<telegram_api::keyboardInlineButton>> buttons;
         buttons.reserve(row.size());
         for (auto &button : row) {
-          buttons.push_back(get_input_keyboard_inline_button(user_manager, button));
+          buttons.push_back(button.get_input_keyboard_inline_button(user_manager));
         }
         rows.push_back(telegram_api::make_object<telegram_api::keyboardInlineButtonRow>(std::move(buttons)));
       }
@@ -398,20 +399,12 @@ telegram_api::object_ptr<telegram_api::ReplyMarkup> ReplyMarkup::get_input_reply
         }
         rows.push_back(telegram_api::make_object<telegram_api::keyboardButtonRow>(std::move(buttons)));
       }
-      int32 flags = 0;
-      if (!placeholder.empty()) {
-        flags |= telegram_api::replyKeyboardMarkup::PLACEHOLDER_MASK;
-      }
-      return telegram_api::make_object<telegram_api::replyKeyboardMarkup>(
-          flags, need_resize_keyboard, is_one_time_keyboard, is_personal, is_persistent, force_reply, std::move(rows),
-          placeholder);
+      return telegram_api::make_object<telegram_api::replyKeyboardMarkup>(0, need_resize_keyboard, is_one_time_keyboard,
+                                                                          is_personal, is_persistent, force_reply,
+                                                                          std::move(rows), placeholder);
     }
     case ReplyMarkup::Type::ForceReply: {
-      int32 flags = 0;
-      if (!placeholder.empty()) {
-        flags |= telegram_api::replyKeyboardForceReply::PLACEHOLDER_MASK;
-      }
-      return telegram_api::make_object<telegram_api::replyKeyboardForceReply>(flags, is_one_time_keyboard, is_personal,
+      return telegram_api::make_object<telegram_api::replyKeyboardForceReply>(0, is_one_time_keyboard, is_personal,
                                                                               placeholder);
     }
     case ReplyMarkup::Type::RemoveKeyboard:
@@ -431,7 +424,7 @@ td_api::object_ptr<td_api::ReplyMarkup> ReplyMarkup::get_reply_markup_object(Use
         vector<td_api::object_ptr<td_api::inlineKeyboardButton>> buttons;
         buttons.reserve(row.size());
         for (auto &button : row) {
-          buttons.push_back(get_inline_keyboard_button_object(user_manager, button));
+          buttons.push_back(button.get_inline_keyboard_button_object(user_manager));
         }
         rows.push_back(std::move(buttons));
       }

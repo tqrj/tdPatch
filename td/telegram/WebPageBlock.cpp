@@ -22,9 +22,6 @@
 #include "td/telegram/DocumentsManager.h"
 #include "td/telegram/DocumentsManager.hpp"
 #include "td/telegram/files/FileId.h"
-#include "td/telegram/files/FileManager.h"
-#include "td/telegram/FormattedDate.h"
-#include "td/telegram/FormattedDate.hpp"
 #include "td/telegram/InlineKeyboardButton.h"
 #include "td/telegram/InlineKeyboardButton.hpp"
 #include "td/telegram/LinkManager.h"
@@ -40,10 +37,11 @@
 #include "td/telegram/PhotoFormat.h"
 #include "td/telegram/RichButtonStyle.h"
 #include "td/telegram/RichButtonStyle.hpp"
+#include "td/telegram/RichText.h"
+#include "td/telegram/RichText.hpp"
 #include "td/telegram/Td.h"
 #include "td/telegram/telegram_api.h"
 #include "td/telegram/ThemeManager.h"
-#include "td/telegram/UserManager.h"
 #include "td/telegram/Version.h"
 #include "td/telegram/VideosManager.h"
 #include "td/telegram/VideosManager.hpp"
@@ -60,23 +58,10 @@
 #include "td/utils/tl_helpers.h"
 
 #include <type_traits>
-#include <unordered_map>
 
 namespace td {
 
-class RichText;
-
-struct GetWebPageBlockObjectContext {
-  Td *td_ = nullptr;
-  Slice base_url_;
-  string real_url_host_;
-  string real_url_rhash_;
-  bool skip_bot_commands_ = false;
-
-  bool is_first_pass_ = true;
-  bool has_anchor_urls_ = false;
-  std::unordered_map<Slice, const RichText *, SliceHash> anchors_;  // anchor -> text
-};
+class FileManager;
 
 static vector<td_api::object_ptr<td_api::PageBlock>> get_page_blocks_object(
     const vector<unique_ptr<WebPageBlock>> &page_blocks, GetWebPageBlockObjectContext *context) {
@@ -84,723 +69,6 @@ static vector<td_api::object_ptr<td_api::PageBlock>> get_page_blocks_object(
     return page_block->get_page_block_object(context);
   });
 }
-
-class RichText {
-  static vector<td_api::object_ptr<td_api::RichText>> get_rich_texts_object(const vector<RichText> &rich_texts,
-                                                                            GetWebPageBlockObjectContext *context) {
-    return transform(rich_texts,
-                     [context](const RichText &rich_text) { return rich_text.get_rich_text_object(context); });
-  }
-
-  static vector<telegram_api::object_ptr<telegram_api::RichText>> get_input_rich_texts(
-      const vector<RichText> &rich_texts, GetInputPageBlockContext &context) {
-    return transform(rich_texts, [&](const RichText &rich_text) { return rich_text.get_input_rich_text(context); });
-  }
-
-  static string trim_first(const string &str, char c) {
-    if (!str.empty() && str[0] == c) {
-      return str.substr(1);
-    }
-    LOG(ERROR) << "Expected string starting with '" << c << "', but received \"" << str << '"';
-    return str;
-  }
-
- public:
-  RichText() = default;
-  RichText(const RichText &) = delete;
-  RichText &operator=(const RichText &) = delete;
-  RichText(RichText &&) = default;
-  RichText &operator=(RichText &&) = default;
-  ~RichText() = default;
-
-  enum class Type : int32 {
-    Plain,
-    Bold,
-    Italic,
-    Underline,
-    Strikethrough,
-    Fixed,
-    Url,
-    EmailAddress,
-    Concatenation,
-    Subscript,
-    Superscript,
-    Marked,
-    PhoneNumber,
-    Icon,
-    Anchor,
-    Math,
-    CustomEmoji,
-    Spoiler,
-    Mention,
-    Hashtag,
-    Cashtag,
-    BotCommand,
-    AutoUrl,
-    AutoEmailAddress,
-    AutoPhoneNumber,
-    FormattedDate,
-    BankCardNumber,
-    MentionName,
-    Diff,
-    Button
-  };
-  Type type = Type::Plain;
-  string content;
-  vector<RichText> texts;
-  FileId document_file_id;
-  CustomEmojiId custom_emoji_id;
-  WebPageId web_page_id;
-  FormattedDate date;
-  UserId user_id;
-  RichButtonStyle button_style;
-  unique_ptr<InlineKeyboardButton> button;
-
-  static Result<RichText> get_rich_text(const Td *td, td_api::object_ptr<td_api::RichText> &&rich_text) {
-    RichText result;
-    if (rich_text == nullptr) {
-      return std::move(result);
-    }
-    switch (rich_text->get_id()) {
-      case td_api::richTextPlain::ID: {
-        auto text = td_api::move_object_as<td_api::richTextPlain>(rich_text);
-        if (!clean_input_string(text->text_)) {
-          return Status::Error(400, "Rich text must be encoded in UTF-8");
-        }
-        result.type = Type::Plain;
-        result.content = std::move(text->text_);
-        break;
-      }
-      case td_api::richTextBold::ID: {
-        auto text = td_api::move_object_as<td_api::richTextBold>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Bold;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextItalic::ID: {
-        auto text = td_api::move_object_as<td_api::richTextItalic>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Italic;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextUnderline::ID: {
-        auto text = td_api::move_object_as<td_api::richTextUnderline>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Underline;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextStrikethrough::ID: {
-        auto text = td_api::move_object_as<td_api::richTextStrikethrough>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Strikethrough;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextSpoiler::ID: {
-        auto text = td_api::move_object_as<td_api::richTextSpoiler>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Spoiler;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextSubscript::ID: {
-        auto text = td_api::move_object_as<td_api::richTextSubscript>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Subscript;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextSuperscript::ID: {
-        auto text = td_api::move_object_as<td_api::richTextSuperscript>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Superscript;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextMarked::ID: {
-        auto text = td_api::move_object_as<td_api::richTextMarked>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Marked;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextDateTime::ID: {
-        auto text = td_api::move_object_as<td_api::richTextDateTime>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        TRY_RESULT(formatted_date, FormattedDate::get_formatted_date(text->unix_time_, text->formatting_type_));
-        result.type = Type::FormattedDate;
-        result.texts.push_back(std::move(t));
-        result.date = std::move(formatted_date);
-        break;
-      }
-      case td_api::richTextMention::ID: {
-        auto text = td_api::move_object_as<td_api::richTextMention>(rich_text);
-        return get_rich_text(td, std::move(text->text_));
-      }
-      case td_api::richTextHashtag::ID: {
-        auto text = td_api::move_object_as<td_api::richTextHashtag>(rich_text);
-        return get_rich_text(td, std::move(text->text_));
-      }
-      case td_api::richTextCashtag::ID: {
-        auto text = td_api::move_object_as<td_api::richTextCashtag>(rich_text);
-        return get_rich_text(td, std::move(text->text_));
-      }
-      case td_api::richTextBankCardNumber::ID: {
-        auto text = td_api::move_object_as<td_api::richTextBankCardNumber>(rich_text);
-        return get_rich_text(td, std::move(text->text_));
-      }
-      case td_api::richTextBotCommand::ID: {
-        auto text = td_api::move_object_as<td_api::richTextBotCommand>(rich_text);
-        return get_rich_text(td, std::move(text->text_));
-      }
-      case td_api::richTextFixed::ID: {
-        auto text = td_api::move_object_as<td_api::richTextFixed>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Fixed;
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextMentionName::ID: {
-        auto text = td_api::move_object_as<td_api::richTextMentionName>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        auto user_id = UserId(text->user_id_);
-        TRY_STATUS(td->user_manager_->get_input_user(user_id));
-        result.type = Type::MentionName;
-        result.texts.push_back(std::move(t));
-        result.user_id = user_id;
-        break;
-      }
-      case td_api::richTextUrl::ID: {
-        auto text = td_api::move_object_as<td_api::richTextUrl>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        if (!clean_input_string(text->url_)) {
-          return Status::Error(400, "Rich text URL must be encoded in UTF-8");
-        }
-        result.type = Type::Url;
-        result.content = std::move(text->url_);
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextEmailAddress::ID: {
-        auto text = td_api::move_object_as<td_api::richTextEmailAddress>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        if (!clean_input_string(text->email_address_)) {
-          return Status::Error(400, "Rich text email address must be encoded in UTF-8");
-        }
-        result.type = Type::EmailAddress;
-        result.content = std::move(text->email_address_);
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextPhoneNumber::ID: {
-        auto text = td_api::move_object_as<td_api::richTextPhoneNumber>(rich_text);
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        if (!clean_input_string(text->phone_number_)) {
-          return Status::Error(400, "Rich text phone number must be encoded in UTF-8");
-        }
-        result.type = Type::PhoneNumber;
-        result.content = std::move(text->phone_number_);
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextCustomEmoji::ID: {
-        auto text = td_api::move_object_as<td_api::richTextCustomEmoji>(rich_text);
-        if (!clean_input_string(text->alternative_text_)) {
-          return Status::Error(400, "Custom emoji alternative text must be encoded in UTF-8");
-        }
-        auto custom_emoji_id = CustomEmojiId(text->custom_emoji_id_);
-        if (!custom_emoji_id.is_valid()) {
-          return Status::Error(400, "Invalid custom emoji identifier specified");
-        }
-        result.type = Type::CustomEmoji;
-        result.content = std::move(text->alternative_text_);
-        result.custom_emoji_id = custom_emoji_id;
-        break;
-      }
-      case td_api::richTextIcon::ID:
-        return Status::Error(400, "Block is not allowed");
-      case td_api::richTextMathematicalExpression::ID: {
-        auto text = td_api::move_object_as<td_api::richTextMathematicalExpression>(rich_text);
-        if (!clean_input_string(text->expression_)) {
-          return Status::Error(400, "Mathematical expression must be encoded in UTF-8");
-        }
-        result.type = Type::Math;
-        result.content = std::move(text->expression_);
-        break;
-      }
-      case td_api::richTextButton::ID: {
-        auto text = td_api::move_object_as<td_api::richTextButton>(rich_text);
-        if (text->button_ == nullptr) {
-          return Status::Error(400, "Button must be non-empty");
-        }
-        TRY_RESULT(t, get_rich_text(td, std::move(text->button_->text_)));
-        TRY_RESULT(button, get_inline_keyboard_button(td_api::make_object<td_api::inlineKeyboardButton>(
-                                                          "1", 0, nullptr, std::move(text->button_->type_)),
-                                                      true));
-        result.type = Type::Button;
-        result.texts.push_back(std::move(t));
-        result.button_style = RichButtonStyle(std::move(text->button_->style_));
-        result.button = make_unique<InlineKeyboardButton>(std::move(button));
-        break;
-      }
-      case td_api::richTextReference::ID: {
-        auto text = td_api::move_object_as<td_api::richTextReference>(rich_text);
-        if (!clean_input_string(text->name_)) {
-          return Status::Error(400, "Reference name must be encoded in UTF-8");
-        }
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Anchor;
-        result.content = std::move(text->name_);
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextReferenceLink::ID: {
-        auto text = td_api::move_object_as<td_api::richTextReferenceLink>(rich_text);
-        if (!clean_input_string(text->reference_name_)) {
-          return Status::Error(400, "Reference name must be encoded in UTF-8");
-        }
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Url;
-        result.content = PSTRING() << '#' << url_encode(text->reference_name_);
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTextAnchor::ID: {
-        auto text = td_api::move_object_as<td_api::richTextAnchor>(rich_text);
-        if (!clean_input_string(text->name_)) {
-          return Status::Error(400, "Anchor name must be encoded in UTF-8");
-        }
-        result.type = Type::Anchor;
-        result.content = std::move(text->name_);
-        result.texts.push_back(RichText());
-        break;
-      }
-      case td_api::richTextAnchorLink::ID: {
-        auto text = td_api::move_object_as<td_api::richTextAnchorLink>(rich_text);
-        if (!clean_input_string(text->anchor_name_)) {
-          return Status::Error(400, "Anchor name must be encoded in UTF-8");
-        }
-        TRY_RESULT(t, get_rich_text(td, std::move(text->text_)));
-        result.type = Type::Url;
-        result.content = PSTRING() << '#' << url_encode(text->anchor_name_);
-        result.texts.push_back(std::move(t));
-        break;
-      }
-      case td_api::richTexts::ID: {
-        auto text = td_api::move_object_as<td_api::richTexts>(rich_text);
-        if (text->texts_.empty()) {
-          break;
-        }
-        vector<RichText> texts;
-        for (auto &subtext : text->texts_) {
-          TRY_RESULT(t, get_rich_text(td, std::move(subtext)));
-          texts.push_back(std::move(t));
-        }
-        result.type = Type::Concatenation;
-        result.texts = std::move(texts);
-        break;
-      }
-      case td_api::richTextDiff::ID:
-        return Status::Error(400, "Block is not allowed");
-      default:
-        UNREACHABLE();
-        break;
-    }
-    return std::move(result);
-  }
-
-  bool empty() const {
-    return type == Type::Plain && content.empty();
-  }
-
-  void append_file_ids(const Td *td, vector<FileId> &file_ids) const {
-    if (type == RichText::Type::Icon) {
-      CHECK(document_file_id.is_valid());
-      Document(Document::Type::General, document_file_id).append_file_ids(td, file_ids);
-    } else {
-      for (auto &text : texts) {
-        text.append_file_ids(td, file_ids);
-      }
-    }
-  }
-
-  void add_dependencies(Dependencies &dependencies) const {
-    for (auto &text : texts) {
-      text.add_dependencies(dependencies);
-    }
-    dependencies.add(web_page_id);
-    dependencies.add(user_id);
-    if (button != nullptr) {
-      button->add_dependencies(dependencies);
-    }
-  }
-
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const {
-    if (recurse_text) {
-      for (auto &text : texts) {
-        text.for_each_rich_text(recurse_text, callback);
-      }
-    }
-    callback(this);
-  }
-
-  string get_full_text() const {
-    string result;
-    for_each_rich_text(true, [&](const RichText *text) {
-      if (text->type == RichText::Type::Plain || text->type == RichText::Type::Math ||
-          text->type == RichText::Type::CustomEmoji) {
-        result += text->content;
-      }
-    });
-    return result;
-  }
-
-  int32 get_index_mask() const {
-    switch (type) {
-      case Type::Url:
-        if (content[0] == '#') {
-          return 0;
-        }
-        return message_search_filter_index_mask(MessageSearchFilter::Url);
-      case Type::AutoUrl:
-      case Type::EmailAddress:
-      case Type::AutoEmailAddress:
-        return message_search_filter_index_mask(MessageSearchFilter::Url);
-      default:
-        return 0;
-    }
-  }
-
-  RichText clone(CloneWebPageBlockContext &context) const {
-    RichText result;
-    result.type = type;
-    result.content = content;
-    for (auto &text : texts) {
-      result.texts.push_back(text.clone(context));
-    }
-    result.document_file_id = document_file_id;
-    result.custom_emoji_id = custom_emoji_id;
-    result.web_page_id = web_page_id;
-    result.date = date;
-    result.user_id = user_id;
-    result.button_style = button_style;
-    if (button != nullptr) {
-      if (context.dup_type_ == MessageContentDupType::Forward && !button->get_forward_text().empty()) {
-        CHECK(result.texts.size() == 1u);
-        result.texts[0] = {};
-        result.texts[0].type = Type::Plain;
-        result.texts[0].content = button->get_forward_text();
-      }
-      result.button = make_unique<InlineKeyboardButton>(
-          button->clone(context.dialog_id_, context.dup_type_, context.is_via_bot_, true));
-    }
-    return result;
-  }
-
-  telegram_api::object_ptr<telegram_api::RichText> get_input_rich_text(GetInputPageBlockContext &context) const {
-    switch (type) {
-      case Type::Plain:
-        if (content.empty()) {
-          return telegram_api::make_object<telegram_api::textEmpty>();
-        }
-        return telegram_api::make_object<telegram_api::textPlain>(content);
-      case Type::Bold:
-        return telegram_api::make_object<telegram_api::textBold>(texts[0].get_input_rich_text(context));
-      case Type::Italic:
-        return telegram_api::make_object<telegram_api::textItalic>(texts[0].get_input_rich_text(context));
-      case Type::Underline:
-        return telegram_api::make_object<telegram_api::textUnderline>(texts[0].get_input_rich_text(context));
-      case Type::Strikethrough:
-        return telegram_api::make_object<telegram_api::textStrike>(texts[0].get_input_rich_text(context));
-      case Type::Fixed:
-        return telegram_api::make_object<telegram_api::textFixed>(texts[0].get_input_rich_text(context));
-      case Type::Url:
-        return telegram_api::make_object<telegram_api::textUrl>(texts[0].get_input_rich_text(context), content, 0);
-      case Type::EmailAddress:
-        return telegram_api::make_object<telegram_api::textEmail>(texts[0].get_input_rich_text(context), content);
-      case Type::Concatenation:
-        return telegram_api::make_object<telegram_api::textConcat>(get_input_rich_texts(texts, context));
-      case Type::Subscript:
-        return telegram_api::make_object<telegram_api::textSubscript>(texts[0].get_input_rich_text(context));
-      case Type::Superscript:
-        return telegram_api::make_object<telegram_api::textSuperscript>(texts[0].get_input_rich_text(context));
-      case Type::Marked:
-        return telegram_api::make_object<telegram_api::textMarked>(texts[0].get_input_rich_text(context));
-      case Type::PhoneNumber:
-        return telegram_api::make_object<telegram_api::textPhone>(texts[0].get_input_rich_text(context), content);
-      case Type::Icon: {
-        auto file_view = context.td_->file_manager_->get_file_view(document_file_id);
-        const auto *main_remote_location = file_view.get_main_remote_location();
-        if (!file_view.is_encrypted() && main_remote_location != nullptr && !main_remote_location->is_web()) {
-          context.documents_.push_back(main_remote_location->as_input_document());
-
-          auto dimensions = to_integer<uint32>(content);
-          auto width = static_cast<int32>(dimensions / 65536);
-          auto height = static_cast<int32>(dimensions % 65536);
-          return telegram_api::make_object<telegram_api::textImage>(main_remote_location->get_id(), width, height);
-        }
-        LOG(ERROR) << "Can't create textImage for icon " << document_file_id;
-        return telegram_api::make_object<telegram_api::textEmpty>();
-      }
-      case Type::Anchor:
-        return telegram_api::make_object<telegram_api::textAnchor>(texts[0].get_input_rich_text(context), content);
-      case Type::Math:
-        return telegram_api::make_object<telegram_api::textMath>(content);
-      case Type::CustomEmoji:
-        return telegram_api::make_object<telegram_api::textCustomEmoji>(custom_emoji_id.get(), content);
-      case Type::Spoiler:
-        return telegram_api::make_object<telegram_api::textSpoiler>(texts[0].get_input_rich_text(context));
-      case Type::Mention:
-        return texts[0].get_input_rich_text(context);
-      case Type::Hashtag:
-        return texts[0].get_input_rich_text(context);
-      case Type::Cashtag:
-        return texts[0].get_input_rich_text(context);
-      case Type::BotCommand:
-        return texts[0].get_input_rich_text(context);
-      case Type::AutoUrl:
-        return texts[0].get_input_rich_text(context);
-      case Type::AutoEmailAddress:
-        return texts[0].get_input_rich_text(context);
-      case Type::AutoPhoneNumber:
-        return texts[0].get_input_rich_text(context);
-      case Type::FormattedDate:
-        return date.get_input_text_date(texts[0].get_input_rich_text(context));
-      case Type::BankCardNumber:
-        return texts[0].get_input_rich_text(context);
-      case Type::MentionName:
-        // input users will be added separately
-        return telegram_api::make_object<telegram_api::textMentionName>(texts[0].get_input_rich_text(context),
-                                                                        user_id.get());
-      case Type::Diff:
-        CHECK(texts.size() == 2u);
-        return telegram_api::make_object<telegram_api::textDiff>(texts[0].get_input_rich_text(context),
-                                                                 texts[1].get_input_rich_text(context));
-      case Type::Button: {
-        int32 flags = 0;
-        auto style = button_style.get_input_rich_button_style();
-        if (style != nullptr) {
-          flags |= telegram_api::textButton::STYLE_MASK;
-        }
-        CHECK(button != nullptr);
-        auto input_button = get_input_keyboard_inline_button(context.td_->user_manager_.get(), *button);
-        return telegram_api::make_object<telegram_api::textButton>(flags, texts[0].get_input_rich_text(context),
-                                                                   std::move(input_button->type_), std::move(style));
-      }
-      default:
-        UNREACHABLE();
-        return nullptr;
-    }
-  }
-
-  td_api::object_ptr<td_api::RichText> get_rich_text_object(GetWebPageBlockObjectContext *context,
-                                                            bool allow_null = false) const {
-    switch (type) {
-      case RichText::Type::Plain:
-        if (allow_null && content.empty()) {
-          return nullptr;
-        }
-        return td_api::make_object<td_api::richTextPlain>(content);
-      case RichText::Type::Bold:
-        return td_api::make_object<td_api::richTextBold>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Italic:
-        return td_api::make_object<td_api::richTextItalic>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Underline:
-        return td_api::make_object<td_api::richTextUnderline>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Strikethrough:
-        return td_api::make_object<td_api::richTextStrikethrough>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Fixed:
-        return td_api::make_object<td_api::richTextFixed>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Url:
-        if (begins_with(content, context->base_url_) && content[context->base_url_.size()] == '#') {
-          if (context->is_first_pass_) {
-            context->has_anchor_urls_ = true;
-          } else {
-            auto anchor = Slice(content).substr(context->base_url_.size() + 1);
-            // https://html.spec.whatwg.org/multipage/browsing-the-web.html#the-indicated-part-of-the-document
-            for (int i = 0; i < 2; i++) {
-              string url_decoded_anchor;
-              if (i == 1) {  // try to url_decode anchor
-                url_decoded_anchor = url_decode(anchor, false);
-                anchor = url_decoded_anchor;
-              }
-              auto it = context->anchors_.find(anchor);
-              if (it != context->anchors_.end()) {
-                if (it->second == nullptr) {
-                  return td_api::make_object<td_api::richTextAnchorLink>(texts[0].get_rich_text_object(context),
-                                                                         anchor.str(), content);
-                } else {
-                  return td_api::make_object<td_api::richTextReferenceLink>(texts[0].get_rich_text_object(context),
-                                                                            anchor.str(), content);
-                }
-              }
-            }
-          }
-        }
-        if (!context->real_url_rhash_.empty() && get_url_host(content) == context->real_url_host_) {
-          if (context->is_first_pass_) {
-            context->has_anchor_urls_ = true;
-          } else {
-            return td_api::make_object<td_api::richTextUrl>(
-                texts[0].get_rich_text_object(context),
-                LinkManager::get_instant_view_link(content, context->real_url_rhash_), true);
-          }
-        }
-        return td_api::make_object<td_api::richTextUrl>(texts[0].get_rich_text_object(context), content,
-                                                        web_page_id.is_valid());
-      case RichText::Type::EmailAddress:
-        return td_api::make_object<td_api::richTextEmailAddress>(texts[0].get_rich_text_object(context), content);
-      case RichText::Type::Concatenation:
-        return td_api::make_object<td_api::richTexts>(get_rich_texts_object(texts, context));
-      case RichText::Type::Subscript:
-        return td_api::make_object<td_api::richTextSubscript>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Superscript:
-        return td_api::make_object<td_api::richTextSuperscript>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Marked:
-        return td_api::make_object<td_api::richTextMarked>(texts[0].get_rich_text_object(context));
-      case RichText::Type::PhoneNumber:
-        return td_api::make_object<td_api::richTextPhoneNumber>(texts[0].get_rich_text_object(context), content);
-      case RichText::Type::Icon: {
-        auto dimensions = to_integer<uint32>(content);
-        auto width = static_cast<int32>(dimensions / 65536);
-        auto height = static_cast<int32>(dimensions % 65536);
-        return td_api::make_object<td_api::richTextIcon>(
-            context->td_->documents_manager_->get_document_object(document_file_id, PhotoFormat::Jpeg), width, height);
-      }
-      case RichText::Type::Anchor: {
-        if (context->is_first_pass_) {
-          context->anchors_.emplace(Slice(content), texts[0].empty() ? nullptr : &texts[0]);
-        }
-        if (texts[0].empty()) {
-          return td_api::make_object<td_api::richTextAnchor>(content);
-        }
-        return td_api::make_object<td_api::richTextReference>(content, texts[0].get_rich_text_object(context));
-      }
-      case RichText::Type::Math:
-        return td_api::make_object<td_api::richTextMathematicalExpression>(content);
-      case RichText::Type::CustomEmoji:
-        return td_api::make_object<td_api::richTextCustomEmoji>(custom_emoji_id.get(), content);
-      case RichText::Type::Spoiler:
-        return td_api::make_object<td_api::richTextSpoiler>(texts[0].get_rich_text_object(context));
-      case RichText::Type::Mention:
-        return td_api::make_object<td_api::richTextMention>(texts[0].get_rich_text_object(context),
-                                                            trim_first(texts[0].get_full_text(), '@'));
-      case RichText::Type::Hashtag:
-        return td_api::make_object<td_api::richTextHashtag>(texts[0].get_rich_text_object(context),
-                                                            trim_first(texts[0].get_full_text(), '#'));
-      case RichText::Type::Cashtag:
-        return td_api::make_object<td_api::richTextCashtag>(texts[0].get_rich_text_object(context),
-                                                            trim_first(texts[0].get_full_text(), '$'));
-      case RichText::Type::BotCommand:
-        if (context->skip_bot_commands_) {
-          return texts[0].get_rich_text_object(context);
-        }
-        return td_api::make_object<td_api::richTextBotCommand>(texts[0].get_rich_text_object(context),
-                                                               trim_first(texts[0].get_full_text(), '/'));
-      case RichText::Type::AutoUrl:
-        return td_api::make_object<td_api::richTextUrl>(texts[0].get_rich_text_object(context),
-                                                        texts[0].get_full_text(), false);
-      case RichText::Type::AutoEmailAddress:
-        return td_api::make_object<td_api::richTextEmailAddress>(texts[0].get_rich_text_object(context),
-                                                                 texts[0].get_full_text());
-      case RichText::Type::AutoPhoneNumber:
-        return td_api::make_object<td_api::richTextPhoneNumber>(texts[0].get_rich_text_object(context),
-                                                                texts[0].get_full_text());
-      case RichText::Type::FormattedDate:
-        return td_api::make_object<td_api::richTextDateTime>(texts[0].get_rich_text_object(context), date.get_date(),
-                                                             date.get_date_time_formatting_type_object());
-      case RichText::Type::BankCardNumber:
-        return td_api::make_object<td_api::richTextBankCardNumber>(texts[0].get_rich_text_object(context),
-                                                                   texts[0].get_full_text());
-      case RichText::Type::MentionName:
-        return td_api::make_object<td_api::richTextMentionName>(
-            texts[0].get_rich_text_object(context),
-            context->td_->user_manager_->get_user_id_object(user_id, "richTextMentionName"));
-      case RichText::Type::Diff:
-        CHECK(texts.size() == 2u);
-        return td_api::make_object<td_api::richTextDiff>(texts[0].get_rich_text_object(context),
-                                                         texts[1].get_rich_text_object(context));
-      case RichText::Type::Button: {
-        CHECK(button != nullptr);
-        auto button_object = get_inline_keyboard_button_object(context->td_->user_manager_.get(), *button);
-        return td_api::make_object<td_api::richTextButton>(td_api::make_object<td_api::inlineButton>(
-            texts[0].get_rich_text_object(context), button_style.get_button_style_object(),
-            std::move(button_object->type_)));
-      }
-      default:
-        UNREACHABLE();
-        return nullptr;
-    }
-  }
-
-  friend bool operator==(const RichText &lhs, const RichText &rhs) {
-    return lhs.type == rhs.type && lhs.content == rhs.content && lhs.texts == rhs.texts &&
-           lhs.document_file_id == rhs.document_file_id && lhs.custom_emoji_id == rhs.custom_emoji_id &&
-           lhs.web_page_id == rhs.web_page_id && lhs.date == rhs.date && lhs.user_id == rhs.user_id &&
-           lhs.button_style == rhs.button_style && lhs.button == rhs.button;
-  }
-
-  template <class StorerT>
-  void store(StorerT &storer) const {
-    using ::td::store;
-    store(type, storer);
-    store(content, storer);
-    store(texts, storer);
-    if (type == Type::Icon) {
-      storer.context()->td().get_actor_unsafe()->documents_manager_->store_document(document_file_id, storer);
-    }
-    if (type == Type::Url) {
-      store(web_page_id, storer);
-    }
-    if (type == Type::CustomEmoji) {
-      store(custom_emoji_id, storer);
-    }
-    if (type == Type::FormattedDate) {
-      store(date, storer);
-    }
-    if (type == Type::MentionName) {
-      store(user_id, storer);
-    }
-    if (type == Type::Button) {
-      store(button_style, storer);
-      store(button, storer);
-    }
-  }
-
-  template <class ParserT>
-  void parse(ParserT &parser) {
-    using ::td::parse;
-    parse(type, parser);
-    parse(content, parser);
-    parse(texts, parser);
-    if (type == Type::Icon) {
-      document_file_id = parser.context()->td().get_actor_unsafe()->documents_manager_->parse_document(parser);
-      if (!document_file_id.is_valid()) {
-        LOG(ERROR) << "Failed to load document from database";
-        *this = RichText();
-      }
-    }
-    if (type == Type::Url && parser.version() >= static_cast<int32>(Version::SupportInstantView2_0)) {
-      parse(web_page_id, parser);
-    }
-    if (type == Type::CustomEmoji) {
-      parse(custom_emoji_id, parser);
-    }
-    if (type == Type::FormattedDate) {
-      parse(date, parser);
-    }
-    if (type == Type::MentionName) {
-      parse(user_id, parser);
-    }
-    if (type == Type::Button) {
-      parse(button_style, parser);
-      parse(button, parser);
-    }
-  }
-};
 
 namespace {
 
@@ -829,7 +97,7 @@ class WebPageBlockCaption {
     credit.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const {
     text.for_each_rich_text(recurse_text, callback);
     credit.for_each_rich_text(recurse_text, callback);
   }
@@ -876,8 +144,6 @@ class WebPageBlockCaption {
     parse(text, parser);
     if (parser.version() >= static_cast<int32>(Version::SupportInstantView2_0)) {
       parse(credit, parser);
-    } else {
-      credit = RichText();
     }
   }
 };
@@ -971,7 +237,7 @@ class WebPageBlockTableCell {
     text.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const {
     text.for_each_rich_text(recurse_text, callback);
   }
 
@@ -987,9 +253,6 @@ class WebPageBlockTableCell {
     }
     if (rowspan != 1) {
       flags |= telegram_api::pageTableCell::ROWSPAN_MASK;
-    }
-    if (!text.empty()) {
-      flags |= telegram_api::pageTableCell::TEXT_MASK;
     }
     return telegram_api::make_object<telegram_api::pageTableCell>(
         flags, is_header, align_center, align_right, valign_middle, valign_bottom,
@@ -1113,7 +376,7 @@ class RelatedArticle {
     dependencies.add(web_page_id);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const {
   }
 
   td_api::object_ptr<td_api::pageBlockRelatedArticle> get_page_block_related_article_object(
@@ -1214,7 +477,7 @@ class WebPageBlockUnsupported final : public WebPageBlock {
   void add_dependencies(Dependencies &dependencies) const final {
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
   }
 
   int32 get_index_mask() const final {
@@ -1279,7 +542,7 @@ class WebPageBlockTitle final : public WebPageBlock {
     title.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     title.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1337,7 +600,7 @@ class WebPageBlockSubtitle final : public WebPageBlock {
     subtitle.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     subtitle.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1396,7 +659,7 @@ class WebPageBlockAuthorDate final : public WebPageBlock {
     author.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     author.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1456,7 +719,7 @@ class WebPageBlockHeader final : public WebPageBlock {
     header.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     header.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1514,7 +777,7 @@ class WebPageBlockSubheader final : public WebPageBlock {
     subheader.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     subheader.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1573,7 +836,7 @@ class WebPageBlockHeading final : public WebPageBlock {
     text.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     text.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1654,7 +917,7 @@ class WebPageBlockKicker final : public WebPageBlock {
     kicker.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     kicker.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1712,7 +975,7 @@ class WebPageBlockParagraph final : public WebPageBlock {
     text.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     text.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1770,7 +1033,7 @@ class WebPageBlockPreformatted final : public WebPageBlock {
     text.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     text.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1829,7 +1092,7 @@ class WebPageBlockFooter final : public WebPageBlock {
     footer.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     footer.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1886,7 +1149,7 @@ class WebPageBlockThinking final : public WebPageBlock {
     text.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     text.for_each_rich_text(recurse_text, callback);
   }
 
@@ -1939,7 +1202,7 @@ class WebPageBlockDivider final : public WebPageBlock {
   void add_dependencies(Dependencies &dependencies) const final {
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
   }
 
   int32 get_index_mask() const final {
@@ -1989,11 +1252,15 @@ class WebPageBlockMath final : public WebPageBlock {
   void add_dependencies(Dependencies &dependencies) const final {
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
   }
 
   int32 get_index_mask() const final {
     return 0;
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    callback(RichText::create_math(source));
   }
 
   unique_ptr<WebPageBlock> clone(CloneContext &context) const final {
@@ -2047,7 +1314,7 @@ class WebPageBlockAnchor final : public WebPageBlock {
   void add_dependencies(Dependencies &dependencies) const final {
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
   }
 
   int32 get_index_mask() const final {
@@ -2212,7 +1479,7 @@ class WebPageBlockList final : public WebPageBlock {
       }
     }
 
-    void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const {
+    void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const {
       for (const auto &page_block : page_blocks) {
         page_block->for_each_rich_text(recurse_text, callback);
       }
@@ -2260,9 +1527,7 @@ class WebPageBlockList final : public WebPageBlock {
     telegram_api::object_ptr<telegram_api::PageListOrderedItem> get_input_page_list_ordered_item(
         InputContext &context) const {
       CHECK(!label.empty());
-      int32 flags = telegram_api::pageListOrderedItemBlocks::NUM_MASK |
-                    telegram_api::pageListOrderedItemBlocks::VALUE_MASK |
-                    telegram_api::pageListOrderedItemBlocks::TYPE_MASK;
+      int32 flags = telegram_api::pageListOrderedItemBlocks::VALUE_MASK;
       return telegram_api::make_object<telegram_api::pageListOrderedItemBlocks>(
           flags, has_checkbox, has_checkbox && is_checked, label, get_input_page_blocks(page_blocks, context), value,
           type);
@@ -2357,15 +1622,28 @@ class WebPageBlockList final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    for (auto &item : items) {
+      remove_empty_media_page_blocks(item.page_blocks);
+    }
+    return false;
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     for (auto &item : items) {
       item.add_dependencies(dependencies);
     }
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     for (auto &item : items) {
       item.for_each_rich_text(recurse_text, callback);
+    }
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    for (auto &item : items) {
+      for_each_web_page_blocks_quote_text(item.page_blocks, callback);
     }
   }
 
@@ -2402,7 +1680,7 @@ class WebPageBlockList final : public WebPageBlock {
 
   telegram_api::object_ptr<telegram_api::PageBlock> get_input_page_block(InputContext &context) const final {
     if (!items.empty() && !items[0].label.empty()) {
-      int32 flags = telegram_api::pageBlockOrderedList::START_MASK | telegram_api::pageBlockOrderedList::TYPE_MASK;
+      int32 flags = telegram_api::pageBlockOrderedList::START_MASK;
       return telegram_api::make_object<telegram_api::pageBlockOrderedList>(
           flags, is_reversed,
           transform(items, [&](const Item &item) { return item.get_input_page_list_ordered_item(context); }), start,
@@ -2501,9 +1779,10 @@ class WebPageBlockButtonRow final : public WebPageBlock {
         return Status::Error(400, "Button must be non-empty");
       }
       TRY_RESULT_ASSIGN(result.text, RichText::get_rich_text(td, std::move(button->text_)));
-      TRY_RESULT_ASSIGN(result.button, get_inline_keyboard_button(td_api::make_object<td_api::inlineKeyboardButton>(
-                                                                      "1", 0, nullptr, std::move(button->type_)),
-                                                                  true));
+      TRY_RESULT_ASSIGN(
+          result.button,
+          InlineKeyboardButton::get_inline_keyboard_button(
+              td_api::make_object<td_api::inlineKeyboardButton>("1", 0, nullptr, std::move(button->type_)), true));
       result.style = RichButtonStyle(std::move(button->style_));
       return result;
     }
@@ -2516,7 +1795,7 @@ class WebPageBlockButtonRow final : public WebPageBlock {
       button.add_dependencies(dependencies);
     }
 
-    void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const {
+    void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const {
       text.for_each_rich_text(recurse_text, callback);
     }
 
@@ -2527,8 +1806,7 @@ class WebPageBlockButtonRow final : public WebPageBlock {
     Button clone(CloneContext &context) const {
       Button result;
       if (context.dup_type_ == MessageContentDupType::Forward && !button.get_forward_text().empty()) {
-        result.text.type = RichText::Type::Plain;
-        result.text.content = button.get_forward_text();
+        result.text = RichText::create_plain(button.get_forward_text());
       } else {
         result.text = text.clone(context);
       }
@@ -2538,18 +1816,13 @@ class WebPageBlockButtonRow final : public WebPageBlock {
     }
 
     telegram_api::object_ptr<telegram_api::pageButton> get_input_page_button(InputContext &context) const {
-      int32 flags = 0;
-      auto input_style = style.get_input_rich_button_style();
-      if (input_style != nullptr) {
-        flags |= telegram_api::textButton::STYLE_MASK;
-      }
-      auto input_button = get_input_keyboard_inline_button(context.td_->user_manager_.get(), button);
+      auto input_button = button.get_input_keyboard_inline_button(context.td_->user_manager_.get());
       return telegram_api::make_object<telegram_api::pageButton>(
-          flags, text.get_input_rich_text(context), std::move(input_button->type_), std::move(input_style));
+          0, text.get_input_rich_text(context), std::move(input_button->type_), style.get_input_rich_button_style());
     }
 
     td_api::object_ptr<td_api::inlineButton> get_inline_button_object(Context *context) const {
-      auto button_object = get_inline_keyboard_button_object(context->td_->user_manager_.get(), button);
+      auto button_object = button.get_inline_keyboard_button_object(context->td_->user_manager_.get());
       return td_api::make_object<td_api::inlineButton>(
           text.get_rich_text_object(context), style.get_button_style_object(), std::move(button_object->type_));
     }
@@ -2615,10 +1888,13 @@ class WebPageBlockButtonRow final : public WebPageBlock {
     }
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     for (auto &button : buttons) {
       button.for_each_rich_text(recurse_text, callback);
     }
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
   }
 
   int32 get_index_mask() const final {
@@ -2709,7 +1985,7 @@ class WebPageBlockBlockQuote final : public WebPageBlock {
     credit.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     text.for_each_rich_text(recurse_text, callback);
     credit.for_each_rich_text(recurse_text, callback);
   }
@@ -2777,7 +2053,7 @@ class WebPageBlockExpandableBlockQuote final : public WebPageBlock {
     credit.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     text.for_each_rich_text(recurse_text, callback);
     credit.for_each_rich_text(recurse_text, callback);
   }
@@ -2846,7 +2122,7 @@ class WebPageBlockPullQuote final : public WebPageBlock {
     credit.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     text.for_each_rich_text(recurse_text, callback);
     credit.for_each_rich_text(recurse_text, callback);
   }
@@ -2918,11 +2194,15 @@ class WebPageBlockAnimation final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    return !animation_file_id.is_valid();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -2998,11 +2278,8 @@ class WebPageBlockAnimation final : public WebPageBlock {
     if (parser.version() >= static_cast<int32>(Version::FixWebPageInstantViewDatabase)) {
       if (!has_empty_animation) {
         animation_file_id = parser.context()->td().get_actor_unsafe()->animations_manager_->parse_animation(parser);
-      } else {
-        animation_file_id = FileId();
       }
     } else {
-      animation_file_id = FileId();
       parser.set_error("Wrong stored object");
     }
     parse(caption, parser);
@@ -3041,12 +2318,16 @@ class WebPageBlockPhoto final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    return photo.is_empty();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     caption.add_dependencies(dependencies);
     dependencies.add(web_page_id);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -3117,9 +2398,6 @@ class WebPageBlockPhoto final : public WebPageBlock {
     if (parser.version() >= static_cast<int32>(Version::SupportInstantView2_0)) {
       parse(url, parser);
       parse(web_page_id, parser);
-    } else {
-      url.clear();
-      web_page_id = WebPageId();
     }
   }
 };
@@ -3157,11 +2435,15 @@ class WebPageBlockVideo final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    return !video_file_id.is_valid();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -3241,11 +2523,8 @@ class WebPageBlockVideo final : public WebPageBlock {
     if (parser.version() >= static_cast<int32>(Version::FixWebPageInstantViewDatabase)) {
       if (!has_empty_video) {
         video_file_id = parser.context()->td().get_actor_unsafe()->videos_manager_->parse_video(parser);
-      } else {
-        video_file_id = FileId();
       }
     } else {
-      video_file_id = FileId();
       parser.set_error("Wrong stored object");
     }
     parse(caption, parser);
@@ -3272,12 +2551,20 @@ class WebPageBlockCover final : public WebPageBlock {
     cover->append_rich_message_media(media);
   }
 
+  bool remove_empty_media_blocks() final {
+    return cover->remove_empty_media_blocks();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     cover->add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     cover->for_each_rich_text(recurse_text, callback);
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    cover->for_each_quote_text(callback);
   }
 
   bool can_send(const RestrictedRights &rights) const final {
@@ -3357,7 +2644,7 @@ class WebPageBlockEmbedded final : public WebPageBlock {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -3461,11 +2748,16 @@ class WebPageBlockEmbeddedPost final : public WebPageBlock {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     for (auto &page_block : page_blocks) {
       page_block->for_each_rich_text(recurse_text, callback);
     }
     caption.for_each_rich_text(recurse_text, callback);
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    for_each_web_page_blocks_quote_text(page_blocks, callback);
+    caption.for_each_rich_text(false, callback);
   }
 
   bool can_send(const RestrictedRights &rights) const final {
@@ -3548,6 +2840,11 @@ class WebPageBlockCollage final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    remove_empty_media_page_blocks(page_blocks);
+    return page_blocks.empty();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     for (auto &page_block : page_blocks) {
       page_block->add_dependencies(dependencies);
@@ -3555,11 +2852,16 @@ class WebPageBlockCollage final : public WebPageBlock {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     for (auto &page_block : page_blocks) {
       page_block->for_each_rich_text(recurse_text, callback);
     }
     caption.for_each_rich_text(recurse_text, callback);
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    for_each_web_page_blocks_quote_text(page_blocks, callback);
+    caption.for_each_rich_text(false, callback);
   }
 
   bool can_send(const RestrictedRights &rights) const final {
@@ -3644,6 +2946,11 @@ class WebPageBlockSlideshow final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    remove_empty_media_page_blocks(page_blocks);
+    return page_blocks.empty();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     for (auto &page_block : page_blocks) {
       page_block->add_dependencies(dependencies);
@@ -3651,11 +2958,16 @@ class WebPageBlockSlideshow final : public WebPageBlock {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     for (auto &page_block : page_blocks) {
       page_block->for_each_rich_text(recurse_text, callback);
     }
     caption.for_each_rich_text(recurse_text, callback);
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    for_each_web_page_blocks_quote_text(page_blocks, callback);
+    caption.for_each_rich_text(false, callback);
   }
 
   bool can_send(const RestrictedRights &rights) const final {
@@ -3742,7 +3054,7 @@ class WebPageBlockChatLink final : public WebPageBlock {
   void add_dependencies(Dependencies &dependencies) const final {
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
   }
 
   int32 get_index_mask() const final {
@@ -3867,11 +3179,15 @@ class WebPageBlockAudio final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    return !audio_file_id.is_valid();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -3937,16 +3253,13 @@ class WebPageBlockAudio final : public WebPageBlock {
   void parse(ParserT &parser) {
     using ::td::parse;
 
-    bool has_empty_audio;
-    bool is_voice_note_repaired;
+    bool has_empty_audio = false;
+    bool is_voice_note_repaired = false;
     if (parser.version() >= static_cast<int32>(Version::FixPageBlockAudioEmptyFile)) {
       BEGIN_PARSE_FLAGS();
       PARSE_FLAG(has_empty_audio);
       PARSE_FLAG(is_voice_note_repaired);
       END_PARSE_FLAGS();
-    } else {
-      has_empty_audio = false;
-      is_voice_note_repaired = false;
     }
 
     if (!has_empty_audio) {
@@ -3955,7 +3268,6 @@ class WebPageBlockAudio final : public WebPageBlock {
       if (!is_voice_note_repaired) {
         parser.set_error("Trying to repair WebPageBlockVoiceNote");
       }
-      audio_file_id = FileId();
     }
     parse(caption, parser);
   }
@@ -4001,7 +3313,7 @@ class WebPageBlockTable final : public WebPageBlock {
     }
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     title.for_each_rich_text(recurse_text, callback);
     for (auto &row : cells) {
       for (auto &cell : row) {
@@ -4110,6 +3422,11 @@ class WebPageBlockDetails final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    remove_empty_media_page_blocks(page_blocks);
+    return false;
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     header.add_dependencies(dependencies);
     for (auto &page_block : page_blocks) {
@@ -4117,11 +3434,16 @@ class WebPageBlockDetails final : public WebPageBlock {
     }
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     header.for_each_rich_text(recurse_text, callback);
     for (auto &page_block : page_blocks) {
       page_block->for_each_rich_text(recurse_text, callback);
     }
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    header.for_each_rich_text(false, callback);
+    for_each_web_page_blocks_quote_text(page_blocks, callback);
   }
 
   bool can_send(const RestrictedRights &rights) const final {
@@ -4213,6 +3535,11 @@ class WebPageBlockBlockQuoteBlocks final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    remove_empty_media_page_blocks(page_blocks);
+    return false;
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     for (auto &page_block : page_blocks) {
       page_block->add_dependencies(dependencies);
@@ -4220,11 +3547,16 @@ class WebPageBlockBlockQuoteBlocks final : public WebPageBlock {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     for (auto &page_block : page_blocks) {
       page_block->for_each_rich_text(recurse_text, callback);
     }
     caption.for_each_rich_text(recurse_text, callback);
+  }
+
+  void for_each_quote_text(const std::function<void(const RichText &text)> &callback) const final {
+    for_each_web_page_blocks_quote_text(page_blocks, callback);
+    caption.for_each_rich_text(false, callback);
   }
 
   bool can_send(const RestrictedRights &rights) const final {
@@ -4315,7 +3647,7 @@ class WebPageBlockRelatedArticles final : public WebPageBlock {
     }
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     header.for_each_rich_text(recurse_text, callback);
     for (const auto &article : related_articles) {
       article.for_each_rich_text(recurse_text, callback);
@@ -4387,7 +3719,7 @@ class WebPageBlockMap final : public WebPageBlock {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -4459,11 +3791,15 @@ class WebPageBlockVoiceNote final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    return !voice_note_file_id.is_valid();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -4535,8 +3871,6 @@ class WebPageBlockVoiceNote final : public WebPageBlock {
 
     if (!has_empty_voice_note) {
       voice_note_file_id = parser.context()->td().get_actor_unsafe()->voice_notes_manager_->parse_voice_note(parser);
-    } else {
-      voice_note_file_id = FileId();
     }
     parse(caption, parser);
   }
@@ -4567,11 +3901,15 @@ class WebPageBlockDocument final : public WebPageBlock {
     }
   }
 
+  bool remove_empty_media_blocks() final {
+    return !document_file_id.is_valid();
+  }
+
   void add_dependencies(Dependencies &dependencies) const final {
     caption.add_dependencies(dependencies);
   }
 
-  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText *text)> &callback) const final {
+  void for_each_rich_text(bool recurse_text, const std::function<void(const RichText &text)> &callback) const final {
     caption.for_each_rich_text(recurse_text, callback);
   }
 
@@ -4643,243 +3981,12 @@ class WebPageBlockDocument final : public WebPageBlock {
   }
 };
 
-vector<RichText> get_rich_texts(vector<tl_object_ptr<telegram_api::RichText>> &&rich_text_ptrs,
-                                const FlatHashMap<int64, FileId> &documents);
-
-RichText get_rich_text(tl_object_ptr<telegram_api::RichText> &&rich_text_ptr,
-                       const FlatHashMap<int64, FileId> &documents) {
-  CHECK(rich_text_ptr != nullptr);
-
-  RichText result;
-  switch (rich_text_ptr->get_id()) {
-    case telegram_api::textEmpty::ID:
-      break;
-    case telegram_api::textPlain::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textPlain>(rich_text_ptr);
-      result.content = std::move(rich_text->text_);
-      break;
-    }
-    case telegram_api::textBold::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textBold>(rich_text_ptr);
-      result.type = RichText::Type::Bold;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textItalic::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textItalic>(rich_text_ptr);
-      result.type = RichText::Type::Italic;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textUnderline::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textUnderline>(rich_text_ptr);
-      result.type = RichText::Type::Underline;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textStrike::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textStrike>(rich_text_ptr);
-      result.type = RichText::Type::Strikethrough;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textFixed::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textFixed>(rich_text_ptr);
-      result.type = RichText::Type::Fixed;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textUrl::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textUrl>(rich_text_ptr);
-      result.type = RichText::Type::Url;
-      result.content = std::move(rich_text->url_);
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      result.web_page_id = WebPageId(rich_text->webpage_id_);
-      break;
-    }
-    case telegram_api::textEmail::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textEmail>(rich_text_ptr);
-      result.type = RichText::Type::EmailAddress;
-      result.content = std::move(rich_text->email_);
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textConcat::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textConcat>(rich_text_ptr);
-      result.type = RichText::Type::Concatenation;
-      result.texts = get_rich_texts(std::move(rich_text->texts_), documents);
-      break;
-    }
-    case telegram_api::textSubscript::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textSubscript>(rich_text_ptr);
-      result.type = RichText::Type::Subscript;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textSuperscript::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textSuperscript>(rich_text_ptr);
-      result.type = RichText::Type::Superscript;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textMarked::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textMarked>(rich_text_ptr);
-      result.type = RichText::Type::Marked;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textPhone::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textPhone>(rich_text_ptr);
-      result.type = RichText::Type::PhoneNumber;
-      result.content = std::move(rich_text->phone_);
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textImage::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textImage>(rich_text_ptr);
-      auto it = documents.find(rich_text->document_id_);
-      if (it != documents.end()) {
-        result.type = RichText::Type::Icon;
-        result.document_file_id = it->second;
-        Dimensions dimensions = get_dimensions(rich_text->w_, rich_text->h_, "textImage");
-        result.content = PSTRING() << (dimensions.width * static_cast<uint32>(65536) + dimensions.height);
-      } else {
-        LOG(ERROR) << "Can't find document " << rich_text->document_id_;
-      }
-      break;
-    }
-    case telegram_api::textAnchor::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textAnchor>(rich_text_ptr);
-      result.type = RichText::Type::Anchor;
-      result.content = std::move(rich_text->name_);
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textMath::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textMath>(rich_text_ptr);
-      result.type = RichText::Type::Math;
-      result.content = std::move(rich_text->source_);
-      break;
-    }
-    case telegram_api::textCustomEmoji::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textCustomEmoji>(rich_text_ptr);
-      result.type = RichText::Type::CustomEmoji;
-      result.custom_emoji_id = CustomEmojiId(rich_text->document_id_);
-      result.content = std::move(rich_text->alt_);
-      break;
-    }
-    case telegram_api::textSpoiler::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textSpoiler>(rich_text_ptr);
-      result.type = RichText::Type::Spoiler;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textMention::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textMention>(rich_text_ptr);
-      result.type = RichText::Type::Mention;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textHashtag::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textHashtag>(rich_text_ptr);
-      result.type = RichText::Type::Hashtag;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textBotCommand::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textBotCommand>(rich_text_ptr);
-      result.type = RichText::Type::BotCommand;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textCashtag::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textCashtag>(rich_text_ptr);
-      result.type = RichText::Type::Cashtag;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textAutoUrl::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textAutoUrl>(rich_text_ptr);
-      result.type = RichText::Type::AutoUrl;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textAutoEmail::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textAutoEmail>(rich_text_ptr);
-      result.type = RichText::Type::AutoEmailAddress;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textAutoPhone::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textAutoPhone>(rich_text_ptr);
-      result.type = RichText::Type::AutoPhoneNumber;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textBankCard::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textBankCard>(rich_text_ptr);
-      result.type = RichText::Type::BankCardNumber;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      break;
-    }
-    case telegram_api::textMentionName::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textMentionName>(rich_text_ptr);
-      result.type = RichText::Type::MentionName;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      result.user_id = UserId(rich_text->user_id_);
-      if (!result.user_id.is_valid()) {
-        LOG(ERROR) << "Receive " << result.user_id;
-        result.user_id = UserId();
-      }
-      break;
-    }
-    case telegram_api::textDate::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textDate>(rich_text_ptr);
-      auto date = FormattedDate(rich_text->date_, rich_text->relative_, rich_text->short_time_, rich_text->long_time_,
-                                rich_text->short_date_, rich_text->long_date_, rich_text->day_of_week_);
-      if (!date.is_valid()) {
-        break;
-      }
-      result.type = RichText::Type::FormattedDate;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      result.date = std::move(date);
-      break;
-    }
-    case telegram_api::textDiff::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textDiff>(rich_text_ptr);
-      result.type = RichText::Type::Diff;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      result.texts.push_back(get_rich_text(std::move(rich_text->old_text_), documents));
-      break;
-    }
-    case telegram_api::textButton::ID: {
-      auto rich_text = telegram_api::move_object_as<telegram_api::textButton>(rich_text_ptr);
-      result.type = RichText::Type::Button;
-      result.texts.push_back(get_rich_text(std::move(rich_text->text_), documents));
-      result.button_style = RichButtonStyle(std::move(rich_text->style_));
-      result.button = make_unique<InlineKeyboardButton>(get_inline_keyboard_button(
-          telegram_api::make_object<telegram_api::keyboardInlineButton>(0, nullptr, "1", std::move(rich_text->type_))));
-      break;
-    }
-    default:
-      UNREACHABLE();
-  }
-  return result;
-}
-
-vector<RichText> get_rich_texts(vector<tl_object_ptr<telegram_api::RichText>> &&rich_text_ptrs,
-                                const FlatHashMap<int64, FileId> &documents) {
-  return transform(std::move(rich_text_ptrs), [&documents](tl_object_ptr<telegram_api::RichText> &&rich_text) {
-    return get_rich_text(std::move(rich_text), documents);
-  });
-}
-
 WebPageBlockCaption get_page_block_caption(tl_object_ptr<telegram_api::pageCaption> &&page_caption,
                                            const FlatHashMap<int64, FileId> &documents) {
   CHECK(page_caption != nullptr);
   WebPageBlockCaption result;
-  result.text = get_rich_text(std::move(page_caption->text_), documents);
-  result.credit = get_rich_text(std::move(page_caption->credit_), documents);
+  result.text = RichText(std::move(page_caption->text_), documents);
+  result.credit = RichText(std::move(page_caption->credit_), documents);
   return result;
 }
 
@@ -4896,41 +4003,41 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
       return nullptr;
     case telegram_api::pageBlockTitle::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockTitle>(page_block_ptr);
-      return make_unique<WebPageBlockTitle>(get_rich_text(std::move(page_block->text_), documents));
+      return make_unique<WebPageBlockTitle>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::pageBlockSubtitle::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockSubtitle>(page_block_ptr);
-      return make_unique<WebPageBlockSubtitle>(get_rich_text(std::move(page_block->text_), documents));
+      return make_unique<WebPageBlockSubtitle>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::pageBlockAuthorDate::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockAuthorDate>(page_block_ptr);
-      return make_unique<WebPageBlockAuthorDate>(get_rich_text(std::move(page_block->author_), documents),
+      return make_unique<WebPageBlockAuthorDate>(RichText(std::move(page_block->author_), documents),
                                                  page_block->published_date_);
     }
     case telegram_api::pageBlockHeader::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockHeader>(page_block_ptr);
-      return make_unique<WebPageBlockHeader>(get_rich_text(std::move(page_block->text_), documents));
+      return make_unique<WebPageBlockHeader>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::pageBlockSubheader::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockSubheader>(page_block_ptr);
-      return make_unique<WebPageBlockSubheader>(get_rich_text(std::move(page_block->text_), documents));
+      return make_unique<WebPageBlockSubheader>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::pageBlockKicker::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockKicker>(page_block_ptr);
-      return make_unique<WebPageBlockKicker>(get_rich_text(std::move(page_block->text_), documents));
+      return make_unique<WebPageBlockKicker>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::pageBlockParagraph::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockParagraph>(page_block_ptr);
-      return make_unique<WebPageBlockParagraph>(get_rich_text(std::move(page_block->text_), documents));
+      return make_unique<WebPageBlockParagraph>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::pageBlockPreformatted::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockPreformatted>(page_block_ptr);
-      return td::make_unique<WebPageBlockPreformatted>(get_rich_text(std::move(page_block->text_), documents),
+      return td::make_unique<WebPageBlockPreformatted>(RichText(std::move(page_block->text_), documents),
                                                        std::move(page_block->language_));
     }
     case telegram_api::pageBlockFooter::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockFooter>(page_block_ptr);
-      return make_unique<WebPageBlockFooter>(get_rich_text(std::move(page_block->text_), documents));
+      return make_unique<WebPageBlockFooter>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::pageBlockDivider::ID:
       return make_unique<WebPageBlockDivider>();
@@ -4948,8 +4055,8 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
                       switch (list_item_ptr->get_id()) {
                         case telegram_api::pageListItemText::ID: {
                           auto list_item = telegram_api::move_object_as<telegram_api::pageListItemText>(list_item_ptr);
-                          item.page_blocks.push_back(make_unique<WebPageBlockParagraph>(
-                              get_rich_text(std::move(list_item->text_), documents)));
+                          item.page_blocks.push_back(
+                              make_unique<WebPageBlockParagraph>(RichText(std::move(list_item->text_), documents)));
                           item.has_checkbox = list_item->checkbox_;
                           item.is_checked = list_item->checked_;
                           break;
@@ -4988,8 +4095,8 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
                           auto list_item =
                               telegram_api::move_object_as<telegram_api::pageListOrderedItemText>(list_item_ptr);
                           item.label = std::move(list_item->num_);
-                          item.page_blocks.push_back(make_unique<WebPageBlockParagraph>(
-                              get_rich_text(std::move(list_item->text_), documents)));
+                          item.page_blocks.push_back(
+                              make_unique<WebPageBlockParagraph>(RichText(std::move(list_item->text_), documents)));
                           item.has_checkbox = list_item->checkbox_;
                           item.is_checked = list_item->checked_;
                           if ((list_item->flags_ & telegram_api::pageListOrderedItemText::VALUE_MASK) != 0) {
@@ -5035,24 +4142,21 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
     case telegram_api::pageBlockBlockquote::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockBlockquote>(page_block_ptr);
       if (page_block->collapsed_) {
-        return make_unique<WebPageBlockExpandableBlockQuote>(get_rich_text(std::move(page_block->text_), documents),
-                                                             get_rich_text(std::move(page_block->caption_), documents));
+        return make_unique<WebPageBlockExpandableBlockQuote>(RichText(std::move(page_block->text_), documents),
+                                                             RichText(std::move(page_block->caption_), documents));
       }
-      return make_unique<WebPageBlockBlockQuote>(get_rich_text(std::move(page_block->text_), documents),
-                                                 get_rich_text(std::move(page_block->caption_), documents));
+      return make_unique<WebPageBlockBlockQuote>(RichText(std::move(page_block->text_), documents),
+                                                 RichText(std::move(page_block->caption_), documents));
     }
     case telegram_api::pageBlockPullquote::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockPullquote>(page_block_ptr);
-      return make_unique<WebPageBlockPullQuote>(get_rich_text(std::move(page_block->text_), documents),
-                                                get_rich_text(std::move(page_block->caption_), documents));
+      return make_unique<WebPageBlockPullQuote>(RichText(std::move(page_block->text_), documents),
+                                                RichText(std::move(page_block->caption_), documents));
     }
     case telegram_api::pageBlockPhoto::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockPhoto>(page_block_ptr);
       auto it = photos.find(page_block->photo_id_);
-      Photo photo;
-      if (it != photos.end()) {
-        photo = *it->second;
-      }
+      auto photo = it != photos.end() ? *it->second : Photo();
       return td::make_unique<WebPageBlockPhoto>(
           std::move(photo), get_page_block_caption(std::move(page_block->caption_), documents),
           std::move(page_block->url_), WebPageId(page_block->webpage_id_), page_block->spoiler_);
@@ -5069,10 +4173,7 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
       }
 
       auto it = videos.find(page_block->video_id_);
-      FileId video_file_id;
-      if (it != videos.end()) {
-        video_file_id = it->second;
-      }
+      auto video_file_id = it != videos.end() ? it->second : FileId();
       return make_unique<WebPageBlockVideo>(video_file_id,
                                             get_page_block_caption(std::move(page_block->caption_), documents),
                                             need_autoplay, is_looped, page_block->spoiler_);
@@ -5090,11 +4191,8 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockEmbed>(page_block_ptr);
       bool is_full_width = page_block->full_width_;
       bool allow_scrolling = page_block->allow_scrolling_;
-      Photo poster_photo;
       auto it = photos.find(page_block->poster_photo_id_);
-      if (it != photos.end()) {
-        poster_photo = *it->second;
-      }
+      auto poster_photo = it != photos.end() ? *it->second : Photo();
       auto dimensions = get_dimensions(page_block->w_, page_block->h_, "pageBlockEmbed");
       return td::make_unique<WebPageBlockEmbedded>(
           std::move(page_block->url_), std::move(page_block->html_), std::move(poster_photo), dimensions,
@@ -5103,10 +4201,7 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
     case telegram_api::pageBlockEmbedPost::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockEmbedPost>(page_block_ptr);
       auto it = photos.find(page_block->author_photo_id_);
-      Photo author_photo;
-      if (it != photos.end()) {
-        author_photo = *it->second;
-      }
+      auto author_photo = it != photos.end() ? *it->second : Photo();
       return td::make_unique<WebPageBlockEmbeddedPost>(
           std::move(page_block->url_), std::move(page_block->author_), std::move(author_photo), page_block->date_,
           get_web_page_blocks(td, std::move(page_block->blocks_), animations, audios, documents, photos, videos,
@@ -5166,10 +4261,7 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
       }
 
       auto it = audios.find(page_block->audio_id_);
-      FileId audio_file_id;
-      if (it != audios.end()) {
-        audio_file_id = it->second;
-      }
+      auto audio_file_id = it != audios.end() ? it->second : FileId();
       return make_unique<WebPageBlockAudio>(audio_file_id,
                                             get_page_block_caption(std::move(page_block->caption_), documents));
     }
@@ -5197,20 +4289,20 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
             }
           }
           if (table_cell->text_ != nullptr) {
-            cell.text = get_rich_text(std::move(table_cell->text_), documents);
+            cell.text = RichText(std::move(table_cell->text_), documents);
           }
           cell.colspan = max(table_cell->colspan_, 1);
           cell.rowspan = max(table_cell->rowspan_, 1);
           return cell;
         });
       });
-      return td::make_unique<WebPageBlockTable>(get_rich_text(std::move(page_block->title_), documents),
-                                                std::move(cells), is_bordered, is_striped, is_compact);
+      return td::make_unique<WebPageBlockTable>(RichText(std::move(page_block->title_), documents), std::move(cells),
+                                                is_bordered, is_striped, is_compact);
     }
     case telegram_api::pageBlockDetails::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockDetails>(page_block_ptr);
       auto is_open = page_block->open_;
-      return td::make_unique<WebPageBlockDetails>(get_rich_text(std::move(page_block->title_), documents),
+      return td::make_unique<WebPageBlockDetails>(RichText(std::move(page_block->title_), documents),
                                                   get_web_page_blocks(td, std::move(page_block->blocks_), animations,
                                                                       audios, documents, photos, videos, voice_notes),
                                                   is_open);
@@ -5234,7 +4326,7 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
                                   }
                                   return article;
                                 });
-      return td::make_unique<WebPageBlockRelatedArticles>(get_rich_text(std::move(page_block->title_), documents),
+      return td::make_unique<WebPageBlockRelatedArticles>(RichText(std::move(page_block->title_), documents),
                                                           std::move(articles));
     }
     case telegram_api::pageBlockMap::ID: {
@@ -5259,27 +4351,27 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
     }
     case telegram_api::pageBlockHeading1::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockHeading1>(page_block_ptr);
-      return make_unique<WebPageBlockHeading>(get_rich_text(std::move(page_block->text_), documents), 1);
+      return make_unique<WebPageBlockHeading>(RichText(std::move(page_block->text_), documents), 1);
     }
     case telegram_api::pageBlockHeading2::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockHeading2>(page_block_ptr);
-      return make_unique<WebPageBlockHeading>(get_rich_text(std::move(page_block->text_), documents), 2);
+      return make_unique<WebPageBlockHeading>(RichText(std::move(page_block->text_), documents), 2);
     }
     case telegram_api::pageBlockHeading3::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockHeading3>(page_block_ptr);
-      return make_unique<WebPageBlockHeading>(get_rich_text(std::move(page_block->text_), documents), 3);
+      return make_unique<WebPageBlockHeading>(RichText(std::move(page_block->text_), documents), 3);
     }
     case telegram_api::pageBlockHeading4::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockHeading4>(page_block_ptr);
-      return make_unique<WebPageBlockHeading>(get_rich_text(std::move(page_block->text_), documents), 4);
+      return make_unique<WebPageBlockHeading>(RichText(std::move(page_block->text_), documents), 4);
     }
     case telegram_api::pageBlockHeading5::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockHeading5>(page_block_ptr);
-      return make_unique<WebPageBlockHeading>(get_rich_text(std::move(page_block->text_), documents), 5);
+      return make_unique<WebPageBlockHeading>(RichText(std::move(page_block->text_), documents), 5);
     }
     case telegram_api::pageBlockHeading6::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockHeading6>(page_block_ptr);
-      return make_unique<WebPageBlockHeading>(get_rich_text(std::move(page_block->text_), documents), 6);
+      return make_unique<WebPageBlockHeading>(RichText(std::move(page_block->text_), documents), 6);
     }
     case telegram_api::pageBlockMath::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockMath>(page_block_ptr);
@@ -5287,7 +4379,7 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
     }
     case telegram_api::pageBlockThinking::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockThinking>(page_block_ptr);
-      return td::make_unique<WebPageBlockThinking>(get_rich_text(std::move(page_block->text_), documents));
+      return td::make_unique<WebPageBlockThinking>(RichText(std::move(page_block->text_), documents));
     }
     case telegram_api::inputPageBlockMap::ID:
       break;
@@ -5296,7 +4388,7 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
       return td::make_unique<WebPageBlockBlockQuoteBlocks>(
           get_web_page_blocks(td, std::move(page_block->blocks_), animations, audios, documents, photos, videos,
                               voice_notes),
-          get_rich_text(std::move(page_block->caption_), documents));
+          RichText(std::move(page_block->caption_), documents));
     }
     case telegram_api::pageBlockButtonRow::ID: {
       auto page_block = telegram_api::move_object_as<telegram_api::pageBlockButtonRow>(page_block_ptr);
@@ -5304,10 +4396,10 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
           transform(std::move(page_block->buttons_),
                     [&](auto &&button) {
                       WebPageBlockButtonRow::Button result;
-                      result.text = get_rich_text(std::move(button->text_), documents);
+                      result.text = RichText(std::move(button->text_), documents);
                       result.style = RichButtonStyle(std::move(button->style_));
                       result.button =
-                          get_inline_keyboard_button(telegram_api::make_object<telegram_api::keyboardInlineButton>(
+                          InlineKeyboardButton(telegram_api::make_object<telegram_api::keyboardInlineButton>(
                               0, nullptr, "1", std::move(button->type_)));
                       return result;
                     }),
@@ -5329,27 +4421,17 @@ unique_ptr<WebPageBlock> get_web_page_block(Td *td, tl_object_ptr<telegram_api::
 }  // namespace
 
 void WebPageBlock::for_each_text(const std::function<void(Slice text)> &callback) const {
-  for_each_rich_text(false, [&](const RichText *text) { callback(text->get_full_text()); });
+  for_each_rich_text(false, [&](const RichText &text) { callback(text.get_full_text()); });
 }
 
 void WebPageBlock::append_user_ids(vector<UserId> &user_ids) const {
-  for_each_rich_text(true, [&](const RichText *text) {
-    if (text->user_id.is_valid()) {
-      user_ids.push_back(text->user_id);
-    }
-    if (text->button != nullptr) {
-      auto user_id = text->button->user_id;
-      if (user_id.is_valid()) {
-        user_ids.push_back(user_id);
-      }
-    }
-  });
+  for_each_rich_text(true, [&](const RichText &text) { text.append_user_ids(user_ids); });
 }
 
 bool WebPageBlock::has_bot_commands() const {
   bool result = false;
-  for_each_rich_text(true, [&](const RichText *text) {
-    if (text->type == RichText::Type::BotCommand) {
+  for_each_rich_text(true, [&](const RichText &text) {
+    if (text.is_bot_command()) {
       result = true;
     }
   });
@@ -5358,9 +4440,9 @@ bool WebPageBlock::has_bot_commands() const {
 
 vector<string> WebPageBlock::get_hashtags() const {
   vector<string> result;
-  for_each_rich_text(true, [&](const RichText *text) {
-    if (text->type == RichText::Type::Hashtag) {
-      auto hashtag = text->get_full_text();
+  for_each_rich_text(true, [&](const RichText &text) {
+    if (text.is_hashtag()) {
+      auto hashtag = text.get_full_text();
       if (!hashtag.empty()) {
         if (hashtag[0] == '#') {
           hashtag = hashtag.substr(1);
@@ -5376,11 +4458,7 @@ vector<string> WebPageBlock::get_hashtags() const {
 
 vector<CustomEmojiId> WebPageBlock::get_custom_emoji_ids() const {
   vector<CustomEmojiId> custom_emoji_ids;
-  for_each_rich_text(true, [&](const RichText *text) {
-    if (text->custom_emoji_id.is_valid()) {
-      custom_emoji_ids.push_back(text->custom_emoji_id);
-    }
-  });
+  for_each_rich_text(true, [&](const RichText &text) { text.append_custom_emoji_ids(custom_emoji_ids); });
   return custom_emoji_ids;
 }
 
@@ -5828,12 +4906,24 @@ vector<telegram_api::object_ptr<telegram_api::PageBlock>> get_input_page_blocks(
   });
 }
 
+void for_each_web_page_blocks_quote_text(const vector<unique_ptr<WebPageBlock>> &page_blocks,
+                                         const std::function<void(const RichText &text)> &callback) {
+  for (auto &page_block : page_blocks) {
+    page_block->for_each_quote_text(callback);
+  }
+}
+
 vector<RichMessageMedia> get_page_blocks_rich_message_media(const vector<unique_ptr<WebPageBlock>> &page_blocks) {
   vector<RichMessageMedia> result;
   for (const auto &page_block : page_blocks) {
     page_block->append_rich_message_media(result);
   }
   return result;
+}
+
+void remove_empty_media_page_blocks(vector<unique_ptr<WebPageBlock>> &page_blocks) {
+  td::remove_if(page_blocks,
+                [](unique_ptr<WebPageBlock> &page_block) { return page_block->remove_empty_media_blocks(); });
 }
 
 vector<td_api::object_ptr<td_api::PageBlock>> get_page_blocks_object(

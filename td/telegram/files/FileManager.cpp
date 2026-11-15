@@ -15,6 +15,7 @@
 #include "td/telegram/files/FileLocation.h"
 #include "td/telegram/files/FileLocation.hpp"
 #include "td/telegram/Global.h"
+#include "td/telegram/InputMedia.h"
 #include "td/telegram/logevent/LogEvent.h"
 #include "td/telegram/misc.h"
 #include "td/telegram/SecureStorage.h"
@@ -1414,6 +1415,7 @@ string FileManager::get_file_name(FileType file_type, Slice path) {
     case FileType::SecureEncrypted:
     case FileType::SecureDecrypted:
     case FileType::CallLog:
+    case FileType::SpeechRecognitionAudio:
       break;
     default:
       UNREACHABLE();
@@ -1596,7 +1598,7 @@ bool FileManager::try_fix_partial_local_location(FileNodePtr node) {
   auto partial = node->local_.partial();
   if (!partial.iv_.empty()) {
     // can't recalc iv_
-    LOG(INFO) << "   failed - partial location has nonempty iv";
+    LOG(INFO) << "   failed - partial location has non-empty IV";
     return false;
   }
   if (partial.part_size_ >= 512 * (1 << 10) || (partial.part_size_ & (partial.part_size_ - 1)) != 0) {
@@ -2407,7 +2409,7 @@ Status FileManager::merge(FileId x_file_id, FileId y_file_id, bool no_sync) {
     context_->on_merge_files(node->main_file_id_, other_node->main_file_id_);
   }
 
-  bool send_updates_flag = false;
+  bool send_updates_flag = other_node->need_info_flush();
   auto other_pmc_id = other_node->pmc_id_;
   append(node->file_ids_, other_node->file_ids_);
 
@@ -2418,8 +2420,8 @@ Status FileManager::merge(FileId x_file_id, FileId y_file_id, bool no_sync) {
   }
   other_node = {};
 
+  // unsent changes of other_node would be lost with it, so they must be sent with node
   if (send_updates_flag) {
-    // node might not changed, but other_node might changed, so we need to send update anyway
     VLOG(update_file) << "File " << node->main_file_id_ << " has been merged";
     node->on_info_changed();
   }
@@ -3991,7 +3993,7 @@ static bool is_background_type(FileType type) {
   return type == FileType::Wallpaper || type == FileType::Background;
 }
 
-Result<FileId> FileManager::from_persistent_id(CSlice persistent_id, FileType file_type) {
+Result<FileId> FileManager::from_persistent_id(Slice persistent_id, FileType file_type) {
   if (persistent_id.find('.') != string::npos) {
     auto r_http_url = parse_url(persistent_id);
     if (r_http_url.is_error()) {
@@ -5186,7 +5188,7 @@ void FileManager::on_download_error_impl(FileNodePtr node, DownloadQuery::Type t
         !begins_with(status.message(), "FILE_DOWNLOAD_ID_INVALID") &&
         !begins_with(status.message(), "FILE_DOWNLOAD_LIMIT")) {
       // Remove partial location
-      CSlice path = node->local_.partial().path_;
+      Slice path = node->local_.partial().path_;
       if (begins_with(path, get_files_temp_dir(FileType::SecureDecrypted)) ||
           begins_with(path, get_files_temp_dir(FileType::Video))) {
         LOG(INFO) << "Unlink file " << path;
