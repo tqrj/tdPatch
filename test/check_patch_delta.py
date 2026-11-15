@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 OLD_UPSTREAM = "d1085f9cebc5a62379991ae1652673954f229c1f"
@@ -32,6 +33,9 @@ def delta(*revisions):
 
 
 def main():
+    # Windows runner 的重定向输出默认可能是 cp1252，中文审计结果必须使用 UTF-8。
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     expected = delta(OLD_UPSTREAM, OLD_PATCHED)
     old_messages = expected.pop("td/telegram/MessagesManager.cpp")
     # Archive 重算已由上游 6a7cd24b6 整段删除，不能复活旧代码来保留空指针保护。
