@@ -27,6 +27,35 @@
 对应的本地空指针保护随死代码退役，不复活旧重算路径。
 这不替代 AuthManager 的导入初始化与关闭保护。
 
+## TGDirector 原生侧优化
+
+本轮只调整对外更新投递和网络统计初始化，不裁剪 schema、业务 Manager、服务器更新处理或后台刷新。
+
+- `Td::send_update` 在回调投递和 JSON 编码前，丢弃 TGDirector `updateHub` 原有黑名单中的
+  22 类更新：文件进度、聊天动作、在线状态、部分贴纸列表、主题配色和动态浏览更新。
+  消息、动态发布结果、授权、连接、冻结及已读更新仍正常投递。请求响应走 `send_result`，
+  不受更新过滤影响；例如下载请求返回的 `file` 仍保留。
+- 初始化时先预设 `disable_network_statistics=true`，再处理预授权 `setOption`，最后决定是否
+  创建 `NetStatsManager`。因此无需 TGDirector 新增设置流程，新库与已有库都默认不创建统计 Manager。
+  显式排在 `setTdlibParameters` 前的 `setOption(false)` 可以为本次 client 恢复统计；这个覆盖
+  不跨 client 生效，下次打开同一数据库仍先预设为 true。初始化后改选项不会动态重建统计 Manager。
+- 更新过滤是此 fork 的固定行为，不是通用 TDLib 的完整更新契约。未来下游消费这些更新时，
+  必须同步调整原生过滤与行为测试；现有 Go 侧过滤保留，兼容尚未升级的原生库。
+
+`test/patch_profile.cpp` 使用已确认的两个 Seam：`Td::send_update → TdCallback` 和
+`Td::request → TdCallback`。测试覆盖全部 22 类过滤、关键更新与请求响应保留、关闭通知，
+以及统计请求在初始化前排队、初始化后调用、显式覆盖和持久化 false 后重新打开的行为。
+测试不连接 Telegram、不使用真实账号；这些结果不代表真实负载性能数据或 Windows 实机验收。
+
+独立调度器测试必须清理线程本地状态：握手信号量保存线程本地 ActorId，销毁调度器后不能
+让下一轮调度器复用它。重开测试等待 TdCallback 销毁后结束调度器，并清理线程本地状态。
+
+本轮 macOS Release 构建通过，新增测试完成红→绿并连续运行 30 轮通过；源码审计通过，
+Standards / Spec 独立审查均无发现。全量 CTest 重跑通过（两个目标，约 432 秒）。此前一次完整
+运行在上游 `AtomicRead.simple2` 的 `StealingQueue.cpp:98` 失败；仅链接未改动 `tdutils` 的
+`test-tdutils -f +AtomicRead_simple2` 单独运行 20 轮也失败 3 次，证明该不稳定测试不依赖本轮
+TDLib 改动。本轮不修改该并发实现，也不把一次全量通过当作已修复此问题。
+
 ## 本地验收
 
 ```sh
@@ -37,7 +66,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 `check_patch_delta.py` 要求完整 Git 历史。它对比两次上游基线上的自有补丁增删行，
-验证 13 个原位置文件完全保留，并验证限流补丁迁移及 Archive 旧代码退役。
+验证 13 个原位置文件的旧补丁保留，并验证限流补丁迁移及 Archive 旧代码退役。
+TGDirector 的两项优化以固定增删行纳入同一审计，不跳过 Td.cpp 或放宽其旧补丁检查。
 它是源码差异审计，不是运行时证明。发布工作流在 Windows、macOS 都执行该审计和
 `test-patches`，其中行为测试设置 60 秒期限。
 
@@ -51,6 +81,8 @@ ctest --test-dir build --output-on-failure
   通过 TL ping/pong 与时间推进验证节奏、唤醒期限及媒体连接空闲关闭。
 - `MissingPongClosesMain/Media`：无 pong 时不会因取消周期 ping 而漏关连接。
 - `SendErrorKeepsWaitScope`、`RetryAfter_*`：等待预算转换后仍保留范围，进入新版错误处理后仍可解析。
+- `TGDirectorUpdateDelivery`：完整过滤黑名单，保留关键更新、请求响应和关闭通知。
+- `TGDirectorNetworkStatistics*`：默认禁用统计，允许本次预授权覆盖，重开时重新应用预设。
 
 本次已分别临时恢复版本后缀、打开 gzip、移除媒体唤醒保护、恢复上游 padding、
 抹掉等待范围，确认相应用例失败；恢复补丁后重新通过。

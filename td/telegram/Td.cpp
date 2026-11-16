@@ -874,6 +874,10 @@ void Td::init(Parameters parameters, Result<TdDb::OpenedDatabase> r_opened_datab
 
   init_options_and_network();
 
+  // TGDirector doesn't consume traffic counters. Preset before manager creation, including on existing databases.
+  // Explicit preauthentication setOption requests below can override this preset for the current client.
+  option_manager_->set_option_boolean("disable_network_statistics", true);
+
   // we need to process td_api::getOption along with td_api::setOption for consistency
   // we need to process td_api::setOption before managers and MTProto header are created,
   // because their initialization may be affected by the options
@@ -1385,25 +1389,34 @@ void Td::send_update(tl_object_ptr<td_api::Update> &&object) {
   }
 
   switch (object_id) {
-    case td_api::updateAccentColors::ID:
-    case td_api::updateEmojiChatThemes::ID:
-    case td_api::updateFavoriteStickers::ID:
-    case td_api::updateInstalledStickerSets::ID:
-    case td_api::updateProfileAccentColors::ID:
-    case td_api::updateRecentStickers::ID:
-    case td_api::updateSavedAnimations::ID:
-    case td_api::updateSavedNotificationSounds::ID:
+    // TGDirector discards these updates. Stop before callback delivery and JSON encoding;
+    // server updates and internal state have already been processed. Request results use send_result.
+    case td_api::updateFile::ID:
+    case td_api::updateChatAction::ID:
     case td_api::updateUserStatus::ID:
+    case td_api::updateChatOnlineMemberCount::ID:
+    case td_api::updateStickerSet::ID:
+    case td_api::updateInstalledStickerSets::ID:
+    case td_api::updateTrendingStickerSets::ID:
+    case td_api::updateRecentStickers::ID:
+    case td_api::updateFavoriteStickers::ID:
+    case td_api::updateSavedAnimations::ID:
+    case td_api::updateChatBackground::ID:
+    case td_api::updateChatTheme::ID:
+    case td_api::updateDefaultBackground::ID:
+    case td_api::updateEmojiChatThemes::ID:
+    case td_api::updateChatAccentColors::ID:
+    case td_api::updateAccentColors::ID:
+    case td_api::updateProfileAccentColors::ID:
+    case td_api::updateStory::ID:
+    case td_api::updateStoryDeleted::ID:
+    case td_api::updateChatActiveStories::ID:
+    case td_api::updateStoryListChatCount::ID:
+    case td_api::updateStoryStealthMode::ID:
+      return;
+    case td_api::updateSavedNotificationSounds::ID:
       VLOG(td_requests) << "Sending update: " << oneline(to_string(object));
       break;
-    case td_api::updateTrendingStickerSets::ID: {
-      auto update = static_cast<const td_api::updateTrendingStickerSets *>(object.get());
-      auto sticker_sets = update->sticker_sets_.get();
-      VLOG(td_requests) << "Sending update: updateTrendingStickerSets { " << oneline(to_string(update->sticker_type_))
-                        << ", total_count = " << sticker_sets->total_count_
-                        << ", count = " << sticker_sets->sets_.size() << " }";
-      break;
-    }
     case td_api::updateOption::ID:
       if (auth_manager_ == nullptr || !auth_manager_->is_bot()) {
         VLOG(td_requests) << "Sending update: " << to_string(object);

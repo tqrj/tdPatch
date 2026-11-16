@@ -51,7 +51,7 @@ if (NOT CMAKE_CROSSCOMPILING OR EMSCRIPTEN)
     endif()
   endif()
 
-  add_executable(test-patches ${TESTS_MAIN} patch.cpp patch_transport.cpp patch_client.cpp retry_after.cpp)
+  add_executable(test-patches ${TESTS_MAIN} patch.cpp patch_transport.cpp patch_client.cpp patch_profile.cpp retry_after.cpp)
   target_link_libraries(test-patches PRIVATE tdapi tdcore tdclient)
   add_test(test-patches test-patches)
   set_tests_properties(test-patches PROPERTIES TIMEOUT 60)

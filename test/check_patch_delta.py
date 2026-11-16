@@ -48,6 +48,48 @@ def main():
     if old_messages[-3:] != moved:
         raise SystemExit("旧限流补丁基线不匹配")
     expected["td/telegram/MessageQueryManager.cpp"] = moved
+    # TGDirector 专用出口和初始化预设位于旧 Td 参数补丁之前。
+    # 固定已审查的增删行，不放宽旧补丁检查，也不从当前工作区动态生成期望。
+    profile_td_delta = r"""+  // TGDirector doesn't consume traffic counters. Preset before manager creation, including on existing databases.
++  // Explicit preauthentication setOption requests below can override this preset for the current client.
++  option_manager_->set_option_boolean("disable_network_statistics", true);
++
+-    case td_api::updateAccentColors::ID:
+-    case td_api::updateEmojiChatThemes::ID:
+-    case td_api::updateFavoriteStickers::ID:
++    // TGDirector discards these updates. Stop before callback delivery and JSON encoding;
++    // server updates and internal state have already been processed. Request results use send_result.
++    case td_api::updateFile::ID:
++    case td_api::updateChatAction::ID:
++    case td_api::updateUserStatus::ID:
++    case td_api::updateChatOnlineMemberCount::ID:
++    case td_api::updateStickerSet::ID:
+-    case td_api::updateProfileAccentColors::ID:
++    case td_api::updateTrendingStickerSets::ID:
++    case td_api::updateFavoriteStickers::ID:
++    case td_api::updateChatBackground::ID:
++    case td_api::updateChatTheme::ID:
++    case td_api::updateDefaultBackground::ID:
++    case td_api::updateEmojiChatThemes::ID:
++    case td_api::updateChatAccentColors::ID:
++    case td_api::updateAccentColors::ID:
++    case td_api::updateProfileAccentColors::ID:
++    case td_api::updateStory::ID:
++    case td_api::updateStoryDeleted::ID:
++    case td_api::updateChatActiveStories::ID:
++    case td_api::updateStoryListChatCount::ID:
++    case td_api::updateStoryStealthMode::ID:
++      return;
+-    case td_api::updateUserStatus::ID:
+-    case td_api::updateTrendingStickerSets::ID: {
+-      auto update = static_cast<const td_api::updateTrendingStickerSets *>(object.get());
+-      auto sticker_sets = update->sticker_sets_.get();
+-      VLOG(td_requests) << "Sending update: updateTrendingStickerSets { " << oneline(to_string(update->sticker_type_))
+-                        << ", total_count = " << sticker_sets->total_count_
+-                        << ", count = " << sticker_sets->sets_.size() << " }";
+-      break;
+-    }""".splitlines()
+    expected["td/telegram/Td.cpp"] = profile_td_delta + expected["td/telegram/Td.cpp"]
     actual = delta(UPSTREAM)
     failures = []
     for path in sorted(expected.keys() | actual.keys()):
@@ -55,7 +97,7 @@ def main():
             failures.append(path)
     if failures:
         raise SystemExit("魔改补丁差异发生变化，请逐项复核：\n" + "\n".join(failures))
-    print(f"PASS: {len(expected)} 个生产文件的自有补丁增删行与基线一致（含限流迁移）。")
+    print(f"PASS: {len(expected)} 个生产文件的自有补丁增删行与已审查预期一致（含限流迁移及 TGDirector 优化）。")
     print("PASS: MessagesManager 与上游一致，未复活已删除的 Archive 重算。")
 
 
