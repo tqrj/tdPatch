@@ -8,7 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 OLD_UPSTREAM = "d1085f9cebc5a62379991ae1652673954f229c1f"
 OLD_PATCHED = "401e262ed"
-UPSTREAM = "c8828d50f5eac2fc7089ce1089d7ce9095c61b5e"
+UPSTREAM = "1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d"
 
 
 def git(*args):

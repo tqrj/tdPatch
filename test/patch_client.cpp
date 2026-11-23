@@ -16,7 +16,7 @@ void check_outbound() {
   auto bytes = td::G()->mtproto_header().get_default_header();
   td::TlParser parser(bytes);
   ASSERT_EQ(static_cast<td::int32>(0xda9b0d0d), parser.fetch_int());
-  ASSERT_EQ(233, parser.fetch_int());
+  ASSERT_EQ(234, parser.fetch_int());
   ASSERT_EQ(static_cast<td::int32>(0xc1cd5ea9), parser.fetch_int());
   parser.fetch_int();  // flags
   ASSERT_EQ(12345, parser.fetch_int());

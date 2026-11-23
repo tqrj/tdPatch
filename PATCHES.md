@@ -1,6 +1,16 @@
-# layer 233 升级与魔改补丁验收
+# tdPatch 补丁与验收
 
-## 版本与范围
+## TDLib 1.8.71 / layer 234
+
+完整同步上游 `1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d`，包含 Bot 私聊邀请请求和受邀端服务消息。
+`test/check_patch_delta.py` 以这次上游提交为基线，逐行核对 14 个生产文件的本地补丁。
+限流分类、会话调度、更新过滤与投递、请求响应和网络统计仍由 `test-patches` 回归覆盖。
+`Layer234Header` 检查正常和匿名连接头，`ClientFingerprintAndCompression` 另通过真实 Td 初始化检查正常连接头。
+
+原生库的 `getOption("version")` 应返回 `1.8.71`，`getOption("commit_hash")` 应返回本次构建的 tdPatch 完整提交 SHA。
+Go 绑定从同一个 tdPatch 提交生成。构建和测试命令见下文的本地验收。
+
+## layer 233 迁移记录
 
 - 旧上游：`d1085f9cebc5a62379991ae1652673954f229c1f`，TDLib 1.8.67 / layer 229。
 - 旧补丁基线：`401e262ed`。
@@ -71,9 +81,9 @@ TGDirector 的两项优化以固定增删行纳入同一审计，不跳过 Td.cp
 它是源码差异审计，不是运行时证明。发布工作流在 Windows、macOS 都执行该审计和
 `test-patches`，其中行为测试设置 60 秒期限。
 
-`test-patches` 使用合成数据、不登录真实账号：
+`test-patches` 使用合成数据：
 
-- `Layer233Header`：正常与匿名连接头声明 233。
+- `Layer234Header` 验证正常与匿名连接头声明 234。
 - `ClientFingerprintAndCompression`：通过真实 Td 初始化后读取连接头，验证版本字符串不加后缀；
   经 NetQueryCreator 检查多种长度的可压缩请求仍未压缩。初始化前设置 networkTypeNone。
 - `DesktopPadding`：检查各 TL 对齐长度的 padding 边界及全部 16 档分布。
@@ -114,7 +124,7 @@ CGO_LDFLAGS="-Wl,-rpath,/path/to/tdPatch/build -L/path/to/tdPatch/build -ltdjson
 go test ./...
 ```
 
-绑定仓库的 `TestLinkedTDLibMatchesSchema` 实际调用原生库，核对 1.8.70 与生成时的
+绑定仓库的 `TestLinkedTDLibMatchesSchema` 实际调用原生库，核对 1.8.71 与生成时的
 commit_hash，防止误测旧库。TGDirector 使用临时 Go workspace 引用本地新绑定进行编译、
 TDLib 适配层回归及全量 Go 测试；不把本机路径写入其 go.mod。
 
@@ -122,7 +132,7 @@ TGDirector 现成的 `TestCloseWhileRestoringUnknownMyID` 用合成 auth key 与
 覆盖关闭时 getUsers 回调触发崩溃的事故路径。成功登录后的初始化重放由源码审计守护，
 本次不使用真实账号验证其联网成功路径。
 
-## 交付边界
+## TDLib 1.8.70-p1 交付记录
 
 本次不发布标签、远程版本或更新下游生产依赖锁定，不覆盖现有安装目录。
 构建产物位于 `build/`；下游继续使用旧生产锁定，直到两平台产物与 Go 模块成套发布后切换。
